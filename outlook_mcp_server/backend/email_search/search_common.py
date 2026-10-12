@@ -339,6 +339,8 @@ def extract_email_info(item) -> Dict[str, Any]:
     # Extract additional useful information with optimized COM access
     try:
         email_info["unread"] = _get_cached_com_attribute(item, 'UnRead', False)
+        email_info["categories"] = _get_cached_com_attribute(item, 'Categories', '') or ''
+        email_info["flag_status"] = _get_cached_com_attribute(item, 'FlagStatus', 0) or 0
         attachments = _get_cached_com_attribute(item, 'Attachments')
         has_attachments = attachments and hasattr(attachments, 'Count') and attachments.Count > 0
         email_info["has_attachments"] = has_attachments

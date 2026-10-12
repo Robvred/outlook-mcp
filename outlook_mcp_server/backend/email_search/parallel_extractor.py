@@ -320,7 +320,9 @@ def extract_emails_sequential_fallback(items: List[Any]) -> List[Dict[str, Any]]
                 "attachments": attachments,
                 "attachments_count": len(attachments),
                 "embedded_images_count": embedded_images_count,
-                "unread": unread
+                "unread": unread,
+                "categories": getattr(item, 'Categories', '') or '',
+                "flag_status": getattr(item, 'FlagStatus', 0) or 0
             }
             
             if hasattr(items, '__len__'):

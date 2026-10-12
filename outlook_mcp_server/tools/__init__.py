@@ -39,6 +39,15 @@ from .email_operations import (
 
 from .batch_operations import batch_forward_email_tool
 
+from .triage_tools import (
+    ensure_categories_tool,
+    set_email_categories_tool,
+    flag_email_tool,
+    create_task_tool,
+    list_todo_tool,
+    complete_todo_tool,
+)
+
 __all__ = [
     # Folder tools
     'move_folder_tool',
@@ -67,4 +76,12 @@ __all__ = [
     
     # Batch operations
     'batch_forward_email_tool',
+
+    # Triage tools
+    'ensure_categories_tool',
+    'set_email_categories_tool',
+    'flag_email_tool',
+    'create_task_tool',
+    'list_todo_tool',
+    'complete_todo_tool',
 ]

@@ -10,21 +10,26 @@ def reply_to_email_by_number_tool(
     email_number: int, 
     reply_text: str, 
     to_recipients: Union[str, List[str], None] = None, 
-    cc_recipients: Union[str, List[str], None] = None
+    cc_recipients: Union[str, List[str], None] = None,
+    extra_cc: Union[str, List[str], None] = None,
+    importance: Optional[int] = None,
+    include_signature: bool = True,
 ) -> Dict[str, Any]:
-    """Create a DRAFT reply to an email. Does NOT send — the user must review and send manually from Outlook Drafts.
+    """Create a DRAFT reply-all to an email. Does NOT send — the user must review and send manually from Outlook Drafts.
 
     Args:
         email_number: Email's position in the last listing
-        reply_text: Text to prepend to the reply
-        to_recipients: Either a single email string OR a list of email strings (None preserves original recipients)
-        cc_recipients: Either a single email string OR a list of email strings (None preserves original recipients)
+        reply_text: Plain text of the reply (blank lines = paragraphs). Converted to HTML and placed above the signature and quoted thread.
+        to_recipients: Replaces the To line (addresses or GAL display names). None keeps reply-all To.
+        cc_recipients: Replaces the Cc line. None keeps reply-all Cc.
+        extra_cc: Adds people in Cc on top of reply-all (addresses or GAL display names, e.g. "FLORES Ivan Anthony").
+        importance: 0=Low, 1=Normal, 2=High. None keeps Normal.
+        include_signature: Insert the user's default Outlook signature.
 
     Behavior:
         - Always creates a draft; never sends.
-        - When both to_recipients and cc_recipients are None, uses ReplyAll() to preserve original recipients.
-        - Otherwise uses Reply() with the provided recipients.
-        - Response contains the draft's EntryID so the user can locate it in Outlook.
+        - Uses Outlook's native ReplyAll(): HTML format, quoted thread, conversation threading and SMTP recipients are preserved.
+        - Response lists the final To/Cc and any unresolved recipient: show them to the user for checking.
 
     Returns:
         dict: {"type": "text", "text": "Draft reply ... saved to Drafts folder ..."}
@@ -35,7 +40,12 @@ def reply_to_email_by_number_tool(
         raise ValidationError("Reply text must be a non-empty string")
     
     try:
-        result = reply_to_email_by_number(email_number, reply_text, to_recipients, cc_recipients)
+        if isinstance(extra_cc, str):
+            extra_cc = [a.strip() for a in extra_cc.split(';') if a.strip()]
+        result = reply_to_email_by_number(
+            email_number, reply_text, to_recipients, cc_recipients,
+            extra_cc=extra_cc, importance=importance, include_signature=include_signature,
+        )
         return {"type": "text", "text": result}
     except Exception as e:
         return {"type": "text", "text": f"Error replying to email: {str(e)}"}
