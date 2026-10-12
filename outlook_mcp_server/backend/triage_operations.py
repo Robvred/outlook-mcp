@@ -16,6 +16,7 @@ from .com_helpers import (
     join_categories,
     parse_dt,
     split_categories,
+    to_com,
 )
 from .logging_config import get_logger
 from .outlook_session.session_manager import OutlookSessionManager
@@ -122,11 +123,11 @@ def flag_emails(email_numbers: List[int], action: str = "flag", due_date: Option
                         item.FlagRequest = flag_text
                     if due:
                         start = min(datetime.now(), due)
-                        item.TaskStartDate = start.replace(hour=0, minute=0, second=0, microsecond=0)
-                        item.TaskDueDate = due.replace(hour=0, minute=0, second=0, microsecond=0)
+                        item.TaskStartDate = to_com(start.replace(hour=0, minute=0, second=0, microsecond=0))
+                        item.TaskDueDate = to_com(due.replace(hour=0, minute=0, second=0, microsecond=0))
                     if rem:
                         item.ReminderSet = True
-                        item.ReminderTime = rem
+                        item.ReminderTime = to_com(rem)
                 item.Save()
                 detail = f" due {due_date}" if due_date and action == "flag" else ""
                 detail += f", reminder {reminder}" if reminder and action == "flag" else ""
@@ -149,11 +150,11 @@ def create_task(subject: str, body: str = "", due_date: Optional[str] = None,
         task.Body = body or ""
         task.Importance = int(importance)
         if due:
-            task.StartDate = min(datetime.now(), due).replace(hour=0, minute=0, second=0, microsecond=0)
-            task.DueDate = due.replace(hour=0, minute=0, second=0, microsecond=0)
+            task.StartDate = to_com(min(datetime.now(), due).replace(hour=0, minute=0, second=0, microsecond=0))
+            task.DueDate = to_com(due.replace(hour=0, minute=0, second=0, microsecond=0))
         if rem:
             task.ReminderSet = True
-            task.ReminderTime = rem
+            task.ReminderTime = to_com(rem)
         if categories:
             task.Categories = join_categories(categories)
         if link_email_number:
@@ -226,7 +227,12 @@ def list_todo(days_ahead: Optional[int] = None, include_completed: bool = False,
                     folders.append(f)
             except Exception as e:
                 logger.debug(f"Folder {path} not found: {e}")
-        mail_filter = "[FlagStatus] = 2 OR [FlagStatus] = 1" if include_completed else "[FlagStatus] = 2"
+        # PR_FLAG_STATUS (0x10900003): 2 = flagged, 1 = complete. The Jet "[FlagStatus]"
+        # filter does not match modern follow-up flags, so use the DASL property.
+        flag_prop = '"http://schemas.microsoft.com/mapi/proptag/0x10900003"'
+        mail_filter = (
+            f"@SQL={flag_prop} = 2 OR {flag_prop} = 1" if include_completed else f"@SQL={flag_prop} = 2"
+        )
         for folder in folders:
             for it in _iter_restricted(folder, mail_filter, max_items):
                 try:
