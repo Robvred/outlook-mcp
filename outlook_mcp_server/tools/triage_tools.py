@@ -161,3 +161,39 @@ def mailbox_stats_tool(
         return {"type": "json", "data": mailbox_stats(folder_path, days, top_topics, top_senders, include_subfolders)}
     except Exception as e:
         return _err(e)
+
+
+def move_emails_by_filter_tool(
+    target_folder: str,
+    source_folder: Optional[str] = None,
+    days: Optional[int] = 90,
+    subject_contains: Union[str, List[str], None] = None,
+    sender_contains: Union[str, List[str], None] = None,
+    exclude_categories: Union[str, List[str], None] = None,
+    older_than_days: Optional[int] = None,
+    dry_run: bool = True,
+) -> Dict[str, Any]:
+    """Move emails matching criteria from a folder to another, in bulk (server-side filter, cache untouched).
+
+    Criteria are combined with AND; values inside a list are OR. Matching is "contains", case-insensitive.
+    Each call is time-boxed (~45s): re-run with the same arguments until "remaining" is 0.
+    Default is dry_run=True: returns the match count and a sample without moving anything.
+
+    Args:
+        target_folder: Full path of the destination, e.g. "user@company.com/IT Intermodal/MyTMS"
+        source_folder: Full path of the source (default Inbox)
+        days: Only emails received in the last N days (None = no lower bound)
+        subject_contains: Subject must contain one of these terms
+        sender_contains: Sender name or address must contain one of these terms
+        exclude_categories: Skip emails carrying one of these categories, e.g. ["Action", "Attente"]
+        older_than_days: Only emails older than N days
+        dry_run: True (default) to preview, False to move
+    """
+    try:
+        from ..backend.bulk_move import move_by_filter
+        return {"type": "json", "data": move_by_filter(
+            target_folder, source_folder, days, _as_list(subject_contains), _as_list(sender_contains),
+            _as_list(exclude_categories), older_than_days, dry_run,
+        )}
+    except Exception as e:
+        return _err(e)
