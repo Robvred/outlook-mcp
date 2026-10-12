@@ -46,6 +46,7 @@ from .triage_tools import (
     create_task_tool,
     list_todo_tool,
     complete_todo_tool,
+    mailbox_stats_tool,
 )
 
 __all__ = [
@@ -84,4 +85,5 @@ __all__ = [
     'create_task_tool',
     'list_todo_tool',
     'complete_todo_tool',
+    'mailbox_stats_tool',
 ]

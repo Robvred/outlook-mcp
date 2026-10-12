@@ -134,3 +134,30 @@ def complete_todo_tool(entry_id: str) -> Dict[str, Any]:
         return {"type": "text", "text": ops.complete_todo(entry_id)}
     except Exception as e:
         return _err(e)
+
+
+def mailbox_stats_tool(
+    folder_path: Optional[str] = None,
+    days: int = 90,
+    top_topics: int = 150,
+    top_senders: int = 60,
+    include_subfolders: bool = False,
+) -> Dict[str, Any]:
+    """Read-only statistics on a folder over a long period (up to 730 days), without loading the email cache.
+
+    Returns volume per month, To/Cc/other addressing share, automated-sender share, top senders and
+    top conversation topics (normalized subject, count, mails where I am in To, last date, main senders).
+    Use it to understand the mailbox before designing folders or rules.
+
+    Args:
+        folder_path: Folder path (default Inbox), e.g. "user@company.com/Éléments envoyés"
+        days: Look-back window in days (default 90, max 730)
+        top_topics: Number of conversation topics returned (default 150)
+        top_senders: Number of senders returned (default 60)
+        include_subfolders: Also scan subfolders (default False)
+    """
+    try:
+        from ..backend.mailbox_stats import mailbox_stats
+        return {"type": "json", "data": mailbox_stats(folder_path, days, top_topics, top_senders, include_subfolders)}
+    except Exception as e:
+        return _err(e)
