@@ -40,6 +40,7 @@ from . import (
     create_task_tool,
     list_todo_tool,
     complete_todo_tool,
+    mailbox_stats_tool,
 )
 
 
@@ -84,3 +85,4 @@ def register_all_tools(mcp_server: FastMCP) -> None:
     mcp_server.tool(create_task_tool)
     mcp_server.tool(list_todo_tool)
     mcp_server.tool(complete_todo_tool)
+    mcp_server.tool(mailbox_stats_tool)
