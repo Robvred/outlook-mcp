@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import html
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from .shared import email_cache_order
@@ -40,6 +40,16 @@ def parse_dt(value: Optional[str]) -> Optional[datetime]:
         except ValueError:
             continue
     raise ValueError(f"Invalid date '{value}'. Use YYYY-MM-DD or YYYY-MM-DD HH:MM")
+
+
+def to_com(value: datetime) -> datetime:
+    """Wall-clock datetime for Outlook COM.
+
+    pywin32 converts naive datetimes from local time to UTC before handing them to
+    Outlook, which then stores the UTC value as local time (a -2h shift in Paris summer).
+    Tagging the wall-clock value as UTC makes pywin32 pass it through unchanged.
+    """
+    return value.replace(tzinfo=timezone.utc)
 
 
 def fmt_dt(value: Any) -> Optional[str]:
