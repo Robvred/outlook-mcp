@@ -122,8 +122,8 @@ def list_todo_tool(
                          e.g. "user@company.com/Inbox/Critique"
     """
     try:
-        items = ops.list_todo(days_ahead, include_completed, flagged_folders=_as_list(flagged_folders))
-        return {"type": "json", "data": {"count": len(items), "items": items}}
+        items, diagnostics = ops.list_todo(days_ahead, include_completed, flagged_folders=_as_list(flagged_folders))
+        return {"type": "json", "data": {"count": len(items), "items": items, "diagnostics": diagnostics}}
     except Exception as e:
         return _err(e)
 
