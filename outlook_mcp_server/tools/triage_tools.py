@@ -108,15 +108,21 @@ def create_task_tool(
         return _err(e)
 
 
-def list_todo_tool(days_ahead: Optional[int] = None, include_completed: bool = False) -> Dict[str, Any]:
-    """List open Outlook To-Do items (tasks + flagged emails) sorted by due date. Use it to build the daily brief.
+def list_todo_tool(
+    days_ahead: Optional[int] = None,
+    include_completed: bool = False,
+    flagged_folders: Union[str, List[str], None] = None,
+) -> Dict[str, Any]:
+    """List open Outlook tasks and flagged emails sorted by due date. Use it to build the daily brief.
 
     Args:
         days_ahead: Only items due within N days (overdue and undated always included)
         include_completed: Include completed items (default False)
+        flagged_folders: Extra folder paths to scan for flagged emails (Inbox is always scanned),
+                         e.g. "user@company.com/Inbox/Critique"
     """
     try:
-        items = ops.list_todo(days_ahead, include_completed)
+        items = ops.list_todo(days_ahead, include_completed, flagged_folders=_as_list(flagged_folders))
         return {"type": "json", "data": {"count": len(items), "items": items}}
     except Exception as e:
         return _err(e)

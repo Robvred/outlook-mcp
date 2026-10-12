@@ -34,7 +34,6 @@ OL_MARK_NO_DATE = 4
 OL_MARK_COMPLETE = 5
 
 OL_FOLDER_TASKS = 13
-OL_FOLDER_TODO = 28
 OL_TASK_ITEM = 3
 OL_CLASS_MAIL = 43
 OL_CLASS_TASK = 48
@@ -110,6 +109,9 @@ def flag_emails(email_numbers: List[int], action: str = "flag", due_date: Option
         for n in email_numbers:
             try:
                 item = get_item_by_number(session, n)
+                if item.Class != OL_CLASS_MAIL:
+                    results.append(f"#{n} '{item.Subject[:60]}': skipped (not a mail item, e.g. meeting invitation)")
+                    continue
                 if action == "clear":
                     item.ClearTaskFlag()
                 elif action == "complete":
@@ -166,54 +168,88 @@ def create_task(subject: str, body: str = "", due_date: Optional[str] = None,
     return f"Task created: '{subject}' due {due_date or '-'} reminder {reminder or '-'}. EntryID={entry_id}"
 
 
+def _iter_restricted(folder: Any, flt: str, max_items: int):
+    """Iterate a folder's items through Restrict + GetFirst/GetNext (fast over COM)."""
+    items = folder.Items.Restrict(flt)
+    it = items.GetFirst()
+    n = 0
+    while it is not None and n < max_items:
+        yield it
+        n += 1
+        it = items.GetNext()
+
+
 def list_todo(days_ahead: Optional[int] = None, include_completed: bool = False,
-              max_items: int = 200) -> List[Dict[str, Any]]:
-    """List Outlook To-Do items: tasks and flagged emails, sorted by due date.
+              max_items: int = 200, flagged_folders: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """List open tasks (Tasks folder) and flagged emails (Inbox + optional folders), sorted by due date.
 
     days_ahead: only items due within N days (overdue and undated items always included).
+    flagged_folders: extra folder paths to scan for flagged emails (default: Inbox only).
     """
     limit = datetime.now() + timedelta(days=days_ahead) if days_ahead is not None else None
     out: List[Dict[str, Any]] = []
+
+    def keep(due_raw: Any) -> Optional[str]:
+        due_str = fmt_dt(due_raw)
+        if limit and due_str and due_raw.replace(tzinfo=None) > limit:
+            return "__skip__"
+        return due_str
+
     with OutlookSessionManager() as session:
-        folder = session.namespace.GetDefaultFolder(OL_FOLDER_TODO)
-        items = folder.Items
-        for i in range(1, items.Count + 1):
-            if len(out) >= max_items:
-                break
+        # Tasks
+        tasks = session.namespace.GetDefaultFolder(OL_FOLDER_TASKS)
+        task_filter = "[Complete] = True OR [Complete] = False" if include_completed else "[Complete] = False"
+        for it in _iter_restricted(tasks, task_filter, max_items):
             try:
-                it = items.Item(i)
-                cls = it.Class
-                if cls == OL_CLASS_TASK:
-                    done = bool(it.Complete) or it.Status == OL_TASK_COMPLETE
-                    due_raw = it.DueDate
-                    entry = {"type": "task", "subject": it.Subject}
-                elif cls == OL_CLASS_MAIL:
-                    done = it.FlagStatus == 1  # olFlagComplete
-                    due_raw = it.TaskDueDate
-                    entry = {
-                        "type": "email",
-                        "subject": it.TaskSubject or it.Subject,
-                        "from": getattr(it, "SenderName", ""),
-                        "flag": getattr(it, "FlagRequest", ""),
-                    }
-                else:
+                due_str = keep(it.DueDate)
+                if due_str == "__skip__":
                     continue
-                if done and not include_completed:
-                    continue
-                due_str = fmt_dt(due_raw)
-                if limit and due_str and due_raw.replace(tzinfo=None) > limit:
-                    continue
-                entry.update({
+                out.append({
+                    "type": "task",
+                    "subject": it.Subject,
                     "due": due_str,
-                    "reminder": fmt_dt(it.ReminderTime) if getattr(it, "ReminderSet", False) else None,
+                    "reminder": fmt_dt(it.ReminderTime) if it.ReminderSet else None,
                     "categories": split_categories(it.Categories),
                     "importance": {0: "Low", 1: "Normal", 2: "High"}.get(it.Importance, "Normal"),
-                    "completed": done,
+                    "completed": bool(it.Complete),
                     "entry_id": it.EntryID,
                 })
-                out.append(entry)
             except Exception as e:
-                logger.debug(f"Skipping To-Do item {i}: {e}")
+                logger.debug(f"Skipping task: {e}")
+
+        # Flagged emails (FlagStatus: 2 = flagged, 1 = complete)
+        folders = [session.namespace.GetDefaultFolder(6)]  # olFolderInbox
+        for path in flagged_folders or []:
+            try:
+                f = session.get_folder(path)
+                if f:
+                    folders.append(f)
+            except Exception as e:
+                logger.debug(f"Folder {path} not found: {e}")
+        mail_filter = "[FlagStatus] = 2 OR [FlagStatus] = 1" if include_completed else "[FlagStatus] = 2"
+        for folder in folders:
+            for it in _iter_restricted(folder, mail_filter, max_items):
+                try:
+                    if it.Class != OL_CLASS_MAIL:
+                        continue
+                    due_str = keep(it.TaskDueDate)
+                    if due_str == "__skip__":
+                        continue
+                    out.append({
+                        "type": "email",
+                        "subject": it.Subject,
+                        "from": getattr(it, "SenderName", ""),
+                        "flag": getattr(it, "FlagRequest", ""),
+                        "due": due_str,
+                        "reminder": fmt_dt(it.ReminderTime) if it.ReminderSet else None,
+                        "categories": split_categories(it.Categories),
+                        "importance": {0: "Low", 1: "Normal", 2: "High"}.get(it.Importance, "Normal"),
+                        "completed": it.FlagStatus == 1,
+                        "entry_id": it.EntryID,
+                    })
+                except Exception as e:
+                    logger.debug(f"Skipping flagged mail: {e}")
+
     out.sort(key=lambda e: (e["due"] is None, e["due"] or ""))
     return out
 
