@@ -169,9 +169,12 @@ def create_task(subject: str, body: str = "", due_date: Optional[str] = None,
     return f"Task created: '{subject}' due {due_date or '-'} reminder {reminder or '-'}. EntryID={entry_id}"
 
 
-def _iter_restricted(folder: Any, flt: str, max_items: int):
-    """Iterate a folder's items through Restrict + GetFirst/GetNext (fast over COM)."""
+def _iter_restricted(folder: Any, flt: str, max_items: int, sort: Optional[str] = None,
+                     descending: bool = False):
+    """Iterate a folder's items through Restrict (+ optional Sort) and GetFirst/GetNext (fast over COM)."""
     items = folder.Items.Restrict(flt)
+    if sort:
+        items.Sort(sort, descending)
     it = items.GetFirst()
     n = 0
     while it is not None and n < max_items:
@@ -230,27 +233,30 @@ def list_todo(days_ahead: Optional[int] = None, include_completed: bool = False,
                 logger.debug(f"Folder {path} not found: {e}")
         # Several filters, unioned by EntryID: which one matches follow-up flags
         # depends on the Outlook/Exchange setup. Counts are reported in diagnostics.
-        flag_status = '"http://schemas.microsoft.com/mapi/proptag/0x10900003"'  # PR_FLAG_STATUS
-        todo_flags = '"http://schemas.microsoft.com/mapi/proptag/0x0E2B0003"'  # PR_TODO_ITEM_FLAGS
+        # PR_TODO_ITEM_FLAGS = 1 is what matches follow-up flags on Exchange (the
+        # FlagStatus filters return nothing there). It also matches completed flags,
+        # so open ones are narrowed with PidLidTaskComplete; results are sorted by due
+        # date descending so recent flags are never pushed out by old ones.
+        todo_flags = '"http://schemas.microsoft.com/mapi/proptag/0x0E2B0003"'
+        task_complete = '"http://schemas.microsoft.com/mapi/id/{00062003-0000-0000-C000-000000000046}/811c000b"'
         if include_completed:
-            filters = {
-                "dasl_flag_status": f"@SQL={flag_status} = 2 OR {flag_status} = 1",
-                "dasl_todo_flags": f"@SQL={todo_flags} = 1",
-                "jet_flag_status": "[FlagStatus] = 2 OR [FlagStatus] = 1",
-            }
+            filters = {"dasl_todo_flags": f"@SQL={todo_flags} = 1"}
         else:
             filters = {
-                "dasl_flag_status": f"@SQL={flag_status} = 2",
+                "dasl_todo_open": f"@SQL={todo_flags} = 1 AND {task_complete} = 0",
                 "dasl_todo_flags": f"@SQL={todo_flags} = 1",
-                "jet_flag_status": "[FlagStatus] = 2",
             }
+        mail_scan_limit = max(max_items, 500)
         seen = set()
         for folder in folders:
             fname = getattr(folder, "FolderPath", "?")
             for fkey, flt in filters.items():
+                # The broad fallback only runs when the narrow filter found nothing.
+                if fkey == "dasl_todo_flags" and diagnostics["matches"].get(f"{fname} | dasl_todo_open"):
+                    continue
                 matched = 0
                 try:
-                    for it in _iter_restricted(folder, flt, max_items):
+                    for it in _iter_restricted(folder, flt, mail_scan_limit, "[TaskDueDate]", True):
                         matched += 1
                         try:
                             if it.Class != OL_CLASS_MAIL or it.EntryID in seen:
