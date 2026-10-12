@@ -7,7 +7,7 @@ They never send anything. Every change is written to the local audit log.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .audit import log_event
 from .com_helpers import (
@@ -181,7 +181,7 @@ def _iter_restricted(folder: Any, flt: str, max_items: int):
 
 
 def list_todo(days_ahead: Optional[int] = None, include_completed: bool = False,
-              max_items: int = 200, flagged_folders: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+              max_items: int = 200, flagged_folders: Optional[List[str]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """List open tasks (Tasks folder) and flagged emails (Inbox + optional folders), sorted by due date.
 
     days_ahead: only items due within N days (overdue and undated items always included).
@@ -189,6 +189,7 @@ def list_todo(days_ahead: Optional[int] = None, include_completed: bool = False,
     """
     limit = datetime.now() + timedelta(days=days_ahead) if days_ahead is not None else None
     out: List[Dict[str, Any]] = []
+    diagnostics: Dict[str, Any] = {"matches": {}, "errors": []}
 
     def keep(due_raw: Any) -> Optional[str]:
         due_str = fmt_dt(due_raw)
@@ -227,37 +228,60 @@ def list_todo(days_ahead: Optional[int] = None, include_completed: bool = False,
                     folders.append(f)
             except Exception as e:
                 logger.debug(f"Folder {path} not found: {e}")
-        # PR_FLAG_STATUS (0x10900003): 2 = flagged, 1 = complete. The Jet "[FlagStatus]"
-        # filter does not match modern follow-up flags, so use the DASL property.
-        flag_prop = '"http://schemas.microsoft.com/mapi/proptag/0x10900003"'
-        mail_filter = (
-            f"@SQL={flag_prop} = 2 OR {flag_prop} = 1" if include_completed else f"@SQL={flag_prop} = 2"
-        )
+        # Several filters, unioned by EntryID: which one matches follow-up flags
+        # depends on the Outlook/Exchange setup. Counts are reported in diagnostics.
+        flag_status = '"http://schemas.microsoft.com/mapi/proptag/0x10900003"'  # PR_FLAG_STATUS
+        todo_flags = '"http://schemas.microsoft.com/mapi/proptag/0x0E2B0003"'  # PR_TODO_ITEM_FLAGS
+        if include_completed:
+            filters = {
+                "dasl_flag_status": f"@SQL={flag_status} = 2 OR {flag_status} = 1",
+                "dasl_todo_flags": f"@SQL={todo_flags} = 1",
+                "jet_flag_status": "[FlagStatus] = 2 OR [FlagStatus] = 1",
+            }
+        else:
+            filters = {
+                "dasl_flag_status": f"@SQL={flag_status} = 2",
+                "dasl_todo_flags": f"@SQL={todo_flags} = 1",
+                "jet_flag_status": "[FlagStatus] = 2",
+            }
+        seen = set()
         for folder in folders:
-            for it in _iter_restricted(folder, mail_filter, max_items):
+            fname = getattr(folder, "FolderPath", "?")
+            for fkey, flt in filters.items():
+                matched = 0
                 try:
-                    if it.Class != OL_CLASS_MAIL:
-                        continue
-                    due_str = keep(it.TaskDueDate)
-                    if due_str == "__skip__":
-                        continue
-                    out.append({
-                        "type": "email",
-                        "subject": it.Subject,
-                        "from": getattr(it, "SenderName", ""),
-                        "flag": getattr(it, "FlagRequest", ""),
-                        "due": due_str,
-                        "reminder": fmt_dt(it.ReminderTime) if it.ReminderSet else None,
-                        "categories": split_categories(it.Categories),
-                        "importance": {0: "Low", 1: "Normal", 2: "High"}.get(it.Importance, "Normal"),
-                        "completed": it.FlagStatus == 1,
-                        "entry_id": it.EntryID,
-                    })
+                    for it in _iter_restricted(folder, flt, max_items):
+                        matched += 1
+                        try:
+                            if it.Class != OL_CLASS_MAIL or it.EntryID in seen:
+                                continue
+                            if not include_completed and it.FlagStatus == 1:
+                                continue
+                            due_str = keep(it.TaskDueDate)
+                            if due_str == "__skip__":
+                                continue
+                            seen.add(it.EntryID)
+                            out.append({
+                                "type": "email",
+                                "subject": it.Subject,
+                                "from": getattr(it, "SenderName", ""),
+                                "flag": getattr(it, "FlagRequest", ""),
+                                "due": due_str,
+                                "reminder": fmt_dt(it.ReminderTime) if it.ReminderSet else None,
+                                "categories": split_categories(it.Categories),
+                                "importance": {0: "Low", 1: "Normal", 2: "High"}.get(it.Importance, "Normal"),
+                                "completed": it.FlagStatus == 1,
+                                "entry_id": it.EntryID,
+                            })
+                        except Exception as e:
+                            diagnostics["errors"].append(f"{fkey}: {e}")
                 except Exception as e:
-                    logger.debug(f"Skipping flagged mail: {e}")
+                    diagnostics["errors"].append(f"{fname} {fkey} restrict failed: {e}")
+                diagnostics["matches"][f"{fname} | {fkey}"] = matched
 
     out.sort(key=lambda e: (e["due"] is None, e["due"] or ""))
-    return out
+    diagnostics["errors"] = diagnostics["errors"][:20]
+    return out, diagnostics
 
 
 def complete_todo(entry_id: str) -> str:
