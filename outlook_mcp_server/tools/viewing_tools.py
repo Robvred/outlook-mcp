@@ -204,7 +204,9 @@ def view_email_cache_tool(page: int = 1) -> Dict[str, Any]:
                     "received": email_data.get("received_time", "Unknown"),
                     "status": status,
                     "attachments_count": attachments_count,
-                    "embedded_images_count": embedded_images_count
+                    "embedded_images_count": embedded_images_count,
+                    "categories": email_data.get("categories", ""),
+                    "flag": {0: "", 1: "complete", 2: "flagged"}.get(email_data.get("flag_status", 0), "")
                 })
         
         # Return JSON format

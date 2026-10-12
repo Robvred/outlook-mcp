@@ -9,6 +9,13 @@ from .logging_config import get_logger
 from .outlook_session.session_manager import OutlookSessionManager
 from .shared import email_cache, email_cache_order
 from .utils import safe_encode_text, normalize_email_address
+from .com_helpers import (
+    OL_CC,
+    OL_TO,
+    describe_recipients,
+    insert_html_at_top,
+    text_to_html,
+)
 from .validation import (
     DisplayConstants,
     OutlookConstants,
@@ -26,6 +33,9 @@ def reply_to_email_by_number(
     reply_text: str,
     to_recipients: Optional[Union[str, List[str]]] = None,
     cc_recipients: Optional[Union[str, List[str]]] = None,
+    extra_cc: Optional[List[str]] = None,
+    importance: Optional[int] = None,
+    include_signature: bool = True,
 ) -> str:
     """
     Reply to an email with custom recipients if provided.
@@ -35,9 +45,12 @@ def reply_to_email_by_number(
         reply_text: Text to prepend to the reply
         to_recipients: Either a single email string OR a list of email strings (None preserves original recipients)
         cc_recipients: Either a single email string OR a list of email strings (None preserves original recipients)
+        extra_cc: Addresses or GAL display names added in CC on top of the reply-all recipients
+        importance: 0=Low, 1=Normal, 2=High (None keeps default)
+        include_signature: Insert the default Outlook signature (default True)
 
     Returns:
-        str: Success or error message
+        str: Success or error message, including the final To/Cc lists
     """
     # Validate inputs using Pydantic
     try:
@@ -75,222 +88,64 @@ def reply_to_email_by_number(
 
     with OutlookSessionManager() as session:
         try:
-            # Get the email ID, handling different key names that might be used
-            email_id = cached_email.get("id") or cached_email.get("entry_id")
-            if not email_id:
-                raise ValueError(f"Email ID not found in cached data. Available keys: {list(cached_email.keys())}")
-            
+            email_id = cached_email.get("id") or cached_email.get("entry_id") or entry_id
             email = session.namespace.GetItemFromID(email_id)
             if not email:
                 raise RuntimeError("Could not retrieve the email from Outlook.")
 
-            # Create a new email message to have full control over formatting
-            new_mail = session.outlook.CreateItem(OutlookConstants.OL_MAIL_ITEM)
+            # Native Outlook reply: keeps HTML format, quoted thread, conversation
+            # threading and the correct SMTP recipients (Exchange users included).
+            custom = to_recipients is not None or cc_recipients is not None
+            reply = email.ReplyAll()
 
-            # Extract sender email early for use in CC filtering
-            sender_email = safe_encode_text(
-                getattr(email, "SenderEmailAddress", "unknown@example.com"), "to_address"
-            )
-            normalized_sender_email = normalize_email_address(sender_email)
+            # Accessing the inspector makes Outlook insert the default signature.
+            if include_signature:
+                try:
+                    _ = reply.GetInspector
+                except Exception as e:
+                    logger.debug(f"Signature insertion skipped: {e}")
 
-            # Additional sender extraction for robustness
-            sender_name = getattr(email, "SenderName", "")
-            sender_address = getattr(email, "SenderEmailAddress", "")
+            if custom:
+                # Replace only the fields that were explicitly provided.
+                for i in range(reply.Recipients.Count, 0, -1):
+                    rtype = reply.Recipients.Item(i).Type
+                    if (rtype == OL_TO and to_recipients is not None) or (
+                        rtype == OL_CC and cc_recipients is not None
+                    ):
+                        reply.Recipients.Remove(i)
+                for addr in to_recipients or []:
+                    reply.Recipients.Add(addr).Type = OL_TO
+                for addr in cc_recipients or []:
+                    reply.Recipients.Add(addr).Type = OL_CC
+            for addr in extra_cc or []:
+                reply.Recipients.Add(addr).Type = OL_CC
+            reply.Recipients.ResolveAll()
 
-            # Log comprehensive sender information for debugging
-            logger.debug(f"=== SENDER EXTRACTION DEBUG ===")
-            logger.debug(f"SenderEmailAddress: {sender_email}")
-            logger.debug(f"SenderName: {sender_name}")
-            logger.debug(f"Combined sender info: {sender_name} <{sender_address}>")
-            logger.debug(f"Normalized sender email: {normalized_sender_email}")
-            logger.debug(f"=== END SENDER EXTRACTION DEBUG ===")
+            if importance is not None:
+                reply.Importance = int(importance)
 
-            # Also check if sender appears in original email fields
-            original_to = safe_encode_text(getattr(email, "To", ""), "original_to")
-            original_cc = safe_encode_text(getattr(email, "CC", ""), "original_cc")
-            logger.debug(f"Original TO field: {original_to}")
-            logger.debug(f"Original CC field: {original_cc}")
-
-            # Create a comprehensive list of sender variations to filter against
-            sender_variations = set()
-            sender_variations.add(normalized_sender_email)
-
-            # Add display name variations
-            if sender_name and sender_address:
-                # "Name <email@domain.com>" format
-                display_format = f"{sender_name} <{sender_address}>".strip()
-                sender_variations.add(normalize_email_address(display_format))
-
-                # Also check individual components
-                sender_variations.add(normalize_email_address(sender_name))
-
-            # Check if sender appears in original To field
-            if original_to:
-                to_emails = [addr.strip() for addr in original_to.split(";") if addr.strip()]
-                for to_email in to_emails:
-                    normalized_to = normalize_email_address(to_email)
-                    sender_variations.add(normalized_to)
-                    if normalized_to == normalized_sender_email:
-                        logger.debug(f"Found sender in original TO field: {to_email}")
-
-            # Check if sender appears in original CC field
-            if original_cc:
-                cc_emails = [addr.strip() for addr in original_cc.split(";") if addr.strip()]
-                for cc_email in cc_emails:
-                    normalized_cc = normalize_email_address(cc_email)
-                    sender_variations.add(normalized_cc)
-                    if normalized_cc == normalized_sender_email:
-                        logger.debug(f"Found sender in original CC field: {cc_email}")
-
-            logger.debug(f"Sender variations to filter against: {sorted(sender_variations)}")
-
-            # Create a comprehensive filtering function
-            def is_sender_email(email_address: str) -> bool:
-                """Check if an email address matches any sender variation"""
-                normalized = normalize_email_address(email_address)
-                return normalized in sender_variations
-
-            # Determine recipients based on parameters
-            if to_recipients is None and cc_recipients is None:
-                # ReplyAll behavior - get all original recipients
-                new_mail.To = sender_email
-
-                # Use cached recipient data to avoid Outlook name resolution issues
-                cc_recipients_set = set()
-
-                # Get CC recipients from cache using both display names and email addresses
-                cc_recipients_data = cached_email.get("cc_recipients", [])
-                logger.debug(f"Processing {len(cc_recipients_data)} CC recipients from cache")
-
-                for i, recipient_info in enumerate(cc_recipients_data):
-                    if isinstance(recipient_info, dict):
-                        recipient_email = recipient_info.get("email", "").strip()
-                        recipient_display_name = recipient_info.get("display_name", "").strip()
-                        normalized_recipient_email = normalize_email_address(recipient_email)
-
-                        logger.debug(f"CC recipient {i+1}: {recipient_info}")
-                        logger.debug(f"  Extracted email: '{recipient_email}'")
-                        logger.debug(f"  Extracted display name: '{recipient_display_name}'")
-                        logger.debug(f"  Normalized email: '{normalized_recipient_email}'")
-                        logger.debug(f"  Sender normalized: '{normalized_sender_email}'")
-                        logger.debug(f"  Is sender: {is_sender_email(recipient_email)}")
-
-                        if recipient_email:
-                            if not is_sender_email(recipient_email):
-                                # Prefer display name with email, fallback to just email
-                                if recipient_display_name:
-                                    recipient_string = (
-                                        f"{recipient_display_name} <{recipient_email}>"
-                                    )
-                                else:
-                                    recipient_string = recipient_email
-                                cc_recipients_set.add(recipient_string)
-                                logger.debug(f"  -> ADDED to CC: {recipient_string}")
-                            else:
-                                logger.debug(
-                                    f"  -> FILTERED OUT (matches sender): {recipient_email}"
-                                )
-                        else:
-                            logger.debug(f"  -> SKIPPED (empty email)")
-                    else:
-                        logger.debug(f"CC recipient {i+1}: Non-dict format: {recipient_info}")
-
-                logger.debug(f"Total CC recipients after filtering: {len(cc_recipients_set)}")
-                if cc_recipients_set:
-                    logger.debug(f"CC recipients list: {sorted(cc_recipients_set)}")
-
-                # Set CC field with filtered CC recipients if any
-                if cc_recipients_set:
-                    logger.debug(f"Setting CC to (ReplyAll): {sorted(cc_recipients_set)}")
-                    new_mail.CC = "; ".join(sorted(cc_recipients_set))
-                else:
-                    # Explicitly clear CC field if no valid recipients remain
-                    logger.debug("No CC recipients after filtering - clearing CC field")
-                    new_mail.CC = ""
-            else:
-                # Use custom recipients, but ensure original sender is not in CC
-                if to_recipients is not None:
-                    new_mail.To = "; ".join(to_recipients)
-                if cc_recipients is not None:
-                    # Filter out the original sender from CC recipients
-                    filtered_cc = []
-                    for recipient in cc_recipients:
-                        # Use comprehensive sender filtering
-                        if not is_sender_email(recipient):
-                            filtered_cc.append(recipient)
-                            logger.debug(f"CC recipient kept: {recipient}")
-                        else:
-                            logger.info(f"Filtered out original sender from CC: {recipient}")
-
-                    # Explicitly set CC field
-                    if filtered_cc:
-                        logger.debug(f"Setting CC to: {filtered_cc}")
-                        new_mail.CC = "; ".join(filtered_cc)
-                    else:
-                        # Explicitly clear CC field if no valid recipients remain
-                        logger.debug("No CC recipients after filtering - clearing CC field")
-                        new_mail.CC = ""
-
-            # Set subject with RE: prefix
-            subject = safe_encode_text(getattr(email, "Subject", "No Subject"), "subject")
-            new_mail.Subject = f"RE: {subject}"
-
-            # Build the email body with proper formatting and encoding
-            reply_text_safe = safe_encode_text(reply_text, "reply_text")
-            sender_name = safe_encode_text(
-                getattr(email, "SenderName", "Unknown Sender"), "sender_name"
-            )
-            sent_on = safe_encode_text(str(getattr(email, "SentOn", "Unknown")), "sent_on")
-            to_field = safe_encode_text(getattr(email, "To", "Unknown"), "to_field")
-
-            # Build body content
-            body_lines = [
-                reply_text_safe,
-                "",
-                "_" * DisplayConstants.SEPARATOR_LINE_LENGTH,
-                f"From: {sender_name}",
-                f"Sent: {sent_on}",
-                f"To: {to_field}",
-            ]
-
-            # Add CC if present
-            original_cc = safe_encode_text(getattr(email, "CC", ""), "original_cc")
-            if original_cc and original_cc.strip():
-                body_lines.append(f"Cc: {original_cc}")
-
-            body_lines.extend([f"Subject: {subject}", ""])
-
-            # Add the original email content
-            original_body = safe_encode_text(getattr(email, "Body", ""), "original_body")
-            body_lines.append(original_body)
-
-            # Join with proper line endings
-            body_content = "\n".join(body_lines)
-
-            # Set the body of the new email
-            try:
-                new_mail.Body = body_content
-            except Exception as e:
-                logger.warning(f"Failed to set email body, using simplified version: {e}")
-                # Fallback to simple body
-                new_mail.Body = (
-                    f"{reply_text_safe}\n\n{'_' * DisplayConstants.SEPARATOR_LINE_LENGTH}\n[Original email content unavailable]"
-                )
+            reply.HTMLBody = insert_html_at_top(reply.HTMLBody, text_to_html(reply_text))
 
             # Draft-first guardrail: save as draft instead of sending.
-            # The user must review and send the draft from Outlook manually.
-            new_mail.Save()
-            draft_entry_id = getattr(new_mail, "EntryID", "")
+            reply.Save()
+            draft_entry_id = getattr(reply, "EntryID", "")
+            recipients = describe_recipients(reply)
             log_event(
                 "reply_draft_created",
                 email_number=email_number,
                 draft_entry_id=draft_entry_id,
-                to=to_recipients,
-                cc=cc_recipients,
+                to=recipients["to"],
+                cc=recipients["cc"],
             )
             logger.info(f"Draft reply created for email #{email_number} (EntryID={draft_entry_id})")
+            warning = (
+                f" WARNING unresolved recipients: {', '.join(recipients['unresolved'])}."
+                if recipients["unresolved"]
+                else ""
+            )
             return (
-                f"Draft reply to email #{email_number} saved to Drafts folder. "
+                f"Draft reply to email #{email_number} saved to Drafts folder (HTML, threaded). "
+                f"To: {'; '.join(recipients['to']) or '-'} | Cc: {'; '.join(recipients['cc']) or '-'}.{warning} "
                 f"Review and send it manually in Outlook. EntryID={draft_entry_id}"
             )
 
@@ -369,13 +224,17 @@ def compose_email(
                 mail.CC = "; ".join(encoded_cc)
 
             try:
-                if html:
-                    mail.HTMLBody = body_safe
-                else:
-                    mail.Body = body_safe
+                # Accessing the inspector makes Outlook insert the default signature.
+                try:
+                    _ = mail.GetInspector
+                except Exception as e:
+                    logger.debug(f"Signature insertion skipped: {e}")
+                snippet = body_safe if html else text_to_html(body_safe)
+                mail.HTMLBody = insert_html_at_top(mail.HTMLBody, snippet)
             except Exception as e:
-                logger.warning(f"Failed to set email body format, using plain text: {e}")
+                logger.warning(f"Failed to set HTML body, using plain text: {e}")
                 mail.Body = body_safe
+            mail.Recipients.ResolveAll()
 
             # Draft-first guardrail: save as draft, do not send.
             mail.Save()

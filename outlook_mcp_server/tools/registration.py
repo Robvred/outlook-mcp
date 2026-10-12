@@ -32,6 +32,14 @@ from . import (
     
     # Batch operations
     batch_forward_email_tool,
+
+    # Triage tools
+    ensure_categories_tool,
+    set_email_categories_tool,
+    flag_email_tool,
+    create_task_tool,
+    list_todo_tool,
+    complete_todo_tool,
 )
 
 
@@ -68,3 +76,11 @@ def register_all_tools(mcp_server: FastMCP) -> None:
     
     # Batch operations
     mcp_server.tool(batch_forward_email_tool)
+
+    # Triage tools (metadata and tasks only, never send)
+    mcp_server.tool(ensure_categories_tool)
+    mcp_server.tool(set_email_categories_tool)
+    mcp_server.tool(flag_email_tool)
+    mcp_server.tool(create_task_tool)
+    mcp_server.tool(list_todo_tool)
+    mcp_server.tool(complete_todo_tool)
