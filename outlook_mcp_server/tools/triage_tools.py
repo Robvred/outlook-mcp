@@ -71,7 +71,7 @@ def flag_email_tool(
         action: 'flag' (default), 'complete' or 'clear'
         due_date: 'YYYY-MM-DD' (optional)
         reminder: 'YYYY-MM-DD HH:MM' local time (optional, triggers an Outlook reminder popup)
-        flag_text: Flag label, e.g. 'Relancer Infosys' (optional, default 'Follow up')
+        flag_text: Flag label, e.g. 'Follow up vendor' (optional, default 'Follow up')
     """
     try:
         res = ops.flag_emails([int(n) for n in _as_list(email_numbers)], action, due_date, reminder, flag_text)
@@ -180,7 +180,7 @@ def move_emails_by_filter_tool(
     Default is dry_run=True: returns the match count and a sample without moving anything.
 
     Args:
-        target_folder: Full path of the destination, e.g. "user@company.com/IT Intermodal/MyTMS"
+        target_folder: Full path of the destination, e.g. "user@company.com/Projects/ProjectA"
         source_folder: Full path of the source (default Inbox)
         days: Only emails received in the last N days (None = no lower bound)
         subject_contains: Subject must contain one of these terms

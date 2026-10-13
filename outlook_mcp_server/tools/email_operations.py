@@ -22,7 +22,7 @@ def reply_to_email_by_number_tool(
         reply_text: Plain text of the reply (blank lines = paragraphs). Converted to HTML and placed above the signature and quoted thread.
         to_recipients: Replaces the To line (addresses or GAL display names). None keeps reply-all To.
         cc_recipients: Replaces the Cc line. None keeps reply-all Cc.
-        extra_cc: Adds people in Cc on top of reply-all (addresses or GAL display names, e.g. "FLORES Ivan Anthony").
+        extra_cc: Adds people in Cc on top of reply-all (addresses or GAL display names, e.g. "DOE John").
         importance: 0=Low, 1=Normal, 2=High. None keeps Normal.
         include_signature: Insert the user's default Outlook signature.
 
