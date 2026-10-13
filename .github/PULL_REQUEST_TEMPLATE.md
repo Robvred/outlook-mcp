@@ -20,6 +20,9 @@ Please delete options that are not relevant.
 - [ ] Other (please describe):
 
 ## ✅ Checklist
+- [ ] No real organization, person, email address, domain, folder path, project, amount or mailbox content anywhere in the diff, examples or this description (see CLAUDE.md)
+- [ ] No mailbox data, exports, logs or credentials committed
+- [ ] No new code path that sends mail or responds to meetings
 - [ ] My code follows the style guidelines of this project
 - [ ] I have performed a self-review of my own code
 - [ ] I have commented my code, particularly in hard-to-understand areas

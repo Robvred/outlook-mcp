@@ -61,3 +61,15 @@ htmlcov/
 
 # pyenv
 .python-version
+# Mailbox data, exports and audit trails: never commit (see CLAUDE.md)
+*.msg
+*.eml
+*.pst
+*.ost
+*.sqlite
+*.sqlite3
+*.db
+email_cache.json
+audit.log
+exports/
+attachments/
