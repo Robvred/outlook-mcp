@@ -23,7 +23,7 @@ from .validation import (
     validate_cache_available,
     validate_email_number
 )
-from .validators import EmailComposeParams, EmailReplyParams
+from .validators import EmailComposeParams, EmailForwardParams, EmailReplyParams
 
 logger = get_logger(__name__)
 
@@ -152,6 +152,127 @@ def reply_to_email_by_number(
         except Exception as e:
             logger.error(f"Error replying to email #{email_number}: {e}")
             return f"Error replying to email: {str(e)}"
+
+
+def forward_email_by_number(
+    email_number: int,
+    to_recipients: Union[str, List[str]],
+    cc_recipients: Optional[Union[str, List[str]]] = None,
+    forward_text: str = "",
+    include_attachments: bool = True,
+    importance: Optional[int] = None,
+    include_signature: bool = True,
+) -> str:
+    """
+    Forward one cached email to explicit recipients, as a draft.
+
+    Uses Outlook's native Forward(): the original message (header, body, thread) and its
+    attachments are carried over, unlike a reply. Nothing is sent.
+
+    Args:
+        email_number: Email's position in the last listing
+        to_recipients: One or more addresses or GAL display names (string with ";" or list)
+        cc_recipients: Optional Cc recipients (string with ";" or list)
+        forward_text: Plain text placed above the forwarded message
+        include_attachments: Keep the original attachments (default True)
+        importance: 0=Low, 1=Normal, 2=High (None keeps default)
+        include_signature: Insert the default Outlook signature (default True)
+
+    Returns:
+        str: Success or error message, including the final To/Cc lists and attachment count
+    """
+    try:
+        params = EmailForwardParams(
+            email_number=email_number,
+            to_recipients=to_recipients,
+            cc_recipients=cc_recipients,
+            forward_text=forward_text or "",
+        )
+    except Exception as e:
+        logger.error(f"Validation error in forward_email_by_number: {e}")
+        raise ValueError(f"Invalid parameters: {e}")
+
+    try:
+        validate_cache_available(len(email_cache_order))
+        validate_email_number(email_number, len(email_cache_order))
+    except ValidationError as e:
+        logger.error(f"Validation error in forward_email_by_number: {e}")
+        raise ValueError(f"Invalid parameters: {e}")
+
+    entry_id = email_cache_order[email_number - 1]
+    if not entry_id:
+        raise ValueError(f"Email #{email_number} has no entry ID")
+    cached_email = email_cache.get(entry_id)
+    if not cached_email:
+        raise ValueError(f"Email #{email_number} data not found in cache")
+
+    with OutlookSessionManager() as session:
+        try:
+            email_id = cached_email.get("id") or cached_email.get("entry_id") or entry_id
+            email = session.namespace.GetItemFromID(email_id)
+            if not email:
+                raise RuntimeError("Could not retrieve the email from Outlook.")
+
+            fwd = email.Forward()
+
+            # Accessing the inspector makes Outlook insert the default signature.
+            if include_signature:
+                try:
+                    _ = fwd.GetInspector
+                except Exception as e:
+                    logger.debug(f"Signature insertion skipped: {e}")
+
+            # A forward starts with no recipients; clear defensively anyway.
+            for i in range(fwd.Recipients.Count, 0, -1):
+                fwd.Recipients.Remove(i)
+            for addr in params.to_recipients:
+                fwd.Recipients.Add(addr).Type = OL_TO
+            for addr in params.cc_recipients:
+                fwd.Recipients.Add(addr).Type = OL_CC
+            fwd.Recipients.ResolveAll()
+
+            if not include_attachments:
+                for i in range(fwd.Attachments.Count, 0, -1):
+                    fwd.Attachments.Remove(i)
+
+            if importance is not None:
+                fwd.Importance = int(importance)
+
+            if params.forward_text.strip():
+                fwd.HTMLBody = insert_html_at_top(fwd.HTMLBody, text_to_html(params.forward_text))
+
+            # Draft-first guardrail: save as draft instead of sending.
+            fwd.Save()
+            draft_entry_id = getattr(fwd, "EntryID", "")
+            recipients = describe_recipients(fwd)
+            try:
+                attachment_count = int(fwd.Attachments.Count)
+            except Exception:
+                attachment_count = 0
+            log_event(
+                "forward_draft_created",
+                email_number=email_number,
+                draft_entry_id=draft_entry_id,
+                to=recipients["to"],
+                cc=recipients["cc"],
+                attachments=attachment_count,
+            )
+            logger.info(f"Draft forward created for email #{email_number} (EntryID={draft_entry_id})")
+            warning = (
+                f" WARNING unresolved recipients: {', '.join(recipients['unresolved'])}."
+                if recipients["unresolved"]
+                else ""
+            )
+            return (
+                f"Draft forward of email #{email_number} saved to Drafts folder (HTML, original "
+                f"message included, {attachment_count} attachment(s)). "
+                f"To: {'; '.join(recipients['to']) or '-'} | Cc: {'; '.join(recipients['cc']) or '-'}.{warning} "
+                f"Review and send it manually in Outlook. EntryID={draft_entry_id}"
+            )
+
+        except Exception as e:
+            logger.error(f"Error forwarding email #{email_number}: {e}")
+            return f"Error forwarding email: {str(e)}"
 
 
 def compose_email(

@@ -74,7 +74,8 @@ python -c "import win32com.client as w; w.Dispatch('Outlook.Application'); print
 
 | Tool | Purpose |
 |---|---|
-| `reply_to_email_by_number_tool` | Reply-all draft using Outlook's native reply: HTML, signature, quoted thread, threading and resolved recipients. Options: replace To/Cc, add Cc, importance. Returns the final recipient list |
+| `reply_to_email_by_number_tool` | Reply-all draft using Outlook's native reply: HTML, signature, quoted thread, threading and resolved recipients. Options: replace To/Cc (an empty Cc clears it), add Cc, importance. Returns the final recipient list |
+| `forward_email_by_number_tool` | Forward draft using Outlook's native forward: original message and attachments included, explicit To/Cc, optional text on top. Use it to bring someone into a topic with its context |
 | `compose_email_tool` | New draft in HTML with signature |
 | `batch_forward_email_tool` | Forward drafts to a recipient list |
 

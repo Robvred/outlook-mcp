@@ -1,7 +1,11 @@
 """Email operations tools for Outlook MCP Server."""
 
 from typing import Dict, Any, Union, List, Optional
-from ..backend.email_composition import reply_to_email_by_number, compose_email
+from ..backend.email_composition import (
+    compose_email,
+    forward_email_by_number,
+    reply_to_email_by_number,
+)
 from ..backend.outlook_session import OutlookSessionManager
 from ..backend.validation import ValidationError
 
@@ -21,7 +25,7 @@ def reply_to_email_by_number_tool(
         email_number: Email's position in the last listing
         reply_text: Plain text of the reply (blank lines = paragraphs). Converted to HTML and placed above the signature and quoted thread.
         to_recipients: Replaces the To line (addresses or GAL display names). None keeps reply-all To.
-        cc_recipients: Replaces the Cc line. None keeps reply-all Cc.
+        cc_recipients: Replaces the Cc line. None keeps reply-all Cc; [] or "" clears it.
         extra_cc: Adds people in Cc on top of reply-all (addresses or GAL display names, e.g. "DOE John").
         importance: 0=Low, 1=Normal, 2=High. None keeps Normal.
         include_signature: Insert the user's default Outlook signature.
@@ -49,6 +53,55 @@ def reply_to_email_by_number_tool(
         return {"type": "text", "text": result}
     except Exception as e:
         return {"type": "text", "text": f"Error replying to email: {str(e)}"}
+
+
+def forward_email_by_number_tool(
+    email_number: int,
+    to_recipients: Union[str, List[str]],
+    cc_recipients: Union[str, List[str], None] = None,
+    forward_text: str = "",
+    include_attachments: bool = True,
+    importance: Optional[int] = None,
+    include_signature: bool = True,
+) -> Dict[str, Any]:
+    """Create a DRAFT forward of one email to explicit recipients. Does NOT send.
+
+    Use it to bring someone new into a topic with its full context: unlike a reply, the
+    original message and its attachments travel with the draft, and only the recipients
+    given here are on it.
+
+    Args:
+        email_number: Email's position in the last listing
+        to_recipients: Addresses or GAL display names (list, or string separated by ";"). Required.
+        cc_recipients: Optional Cc (list, or string separated by ";").
+        forward_text: Plain text placed above the forwarded message (blank lines = paragraphs).
+        include_attachments: Keep the original attachments (default True).
+        importance: 0=Low, 1=Normal, 2=High. None keeps Normal.
+        include_signature: Insert the user's default Outlook signature.
+
+    Behavior:
+        - Always creates a draft; never sends.
+        - Uses Outlook's native Forward(): HTML, original header and thread, attachments.
+        - Response lists the final To/Cc, the attachment count and any unresolved recipient.
+
+    Returns:
+        dict: {"type": "text", "text": "Draft forward ... saved to Drafts folder ..."}
+    """
+    if not isinstance(email_number, int) or email_number < 1:
+        raise ValidationError("Email number must be a positive integer")
+    try:
+        result = forward_email_by_number(
+            email_number,
+            to_recipients,
+            cc_recipients,
+            forward_text=forward_text,
+            include_attachments=include_attachments,
+            importance=importance,
+            include_signature=include_signature,
+        )
+        return {"type": "text", "text": result}
+    except Exception as e:
+        return {"type": "text", "text": f"Error forwarding email: {str(e)}"}
 
 
 def compose_email_tool(recipient_email: str, subject: str, body: str, cc_email: Optional[str] = None) -> Dict[str, Any]:

@@ -41,6 +41,15 @@ class EmailListParams(BaseModel):
         return v
 
 
+def _is_explicit_empty(value) -> bool:
+    """True for "", "  ", [] or a list holding only blank strings."""
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, list):
+        return all(not (isinstance(x, str) and x.strip()) for x in value)
+    return False
+
+
 class EmailReplyParams(BaseModel):
     """Parameters for replying to an email"""
 
@@ -62,9 +71,13 @@ class EmailReplyParams(BaseModel):
 
     @field_validator("to_recipients", "cc_recipients")
     @classmethod
-    def validate_recipients(cls, v):
+    def validate_recipients(cls, v, info):
         if v is None:
             return None
+
+        # An explicit empty value on cc_recipients means "clear the Cc line".
+        if info.field_name == "cc_recipients" and _is_explicit_empty(v):
+            return []
 
         # Convert single string to list
         if isinstance(v, str):
@@ -92,6 +105,33 @@ class EmailReplyParams(BaseModel):
         """Note: This validator cannot access the original email sender at validation time.
         The actual filtering of original sender from CC will be handled in email_composition.py
         to ensure the original email sender is not included in CC when replying."""
+        return v
+
+
+class EmailForwardParams(BaseModel):
+    """Parameters for forwarding an email as a draft"""
+
+    email_number: int = Field(..., ge=1, description="Email's position in cache")
+    to_recipients: List[str] = Field(..., description="To recipients (at least one)")
+    cc_recipients: List[str] = Field(default_factory=list, description="CC recipients")
+    forward_text: str = Field(default="", description="Text placed above the forwarded message")
+
+    @field_validator("to_recipients", "cc_recipients", mode="before")
+    @classmethod
+    def split_recipients(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, str):
+            v = v.split(";")
+        if not isinstance(v, list):
+            raise ValueError("Recipients must be a string or list of strings")
+        return [x.strip() for x in v if isinstance(x, str) and x.strip()]
+
+    @field_validator("to_recipients")
+    @classmethod
+    def require_to(cls, v):
+        if not v:
+            raise ValueError("to_recipients must contain at least one recipient")
         return v
 
 
