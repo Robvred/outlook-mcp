@@ -51,6 +51,7 @@ from .triage_tools import (
     move_emails_by_filter_tool,
     save_attachments_tool,
     list_local_directory_tool,
+    list_calendar_events_tool,
 )
 
 __all__ = [
@@ -94,4 +95,5 @@ __all__ = [
     'move_emails_by_filter_tool',
     'save_attachments_tool',
     'list_local_directory_tool',
+    'list_calendar_events_tool',
 ]
