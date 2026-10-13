@@ -48,6 +48,8 @@ from .triage_tools import (
     complete_todo_tool,
     mailbox_stats_tool,
     move_emails_by_filter_tool,
+    save_attachments_tool,
+    list_local_directory_tool,
 )
 
 __all__ = [
@@ -88,4 +90,6 @@ __all__ = [
     'complete_todo_tool',
     'mailbox_stats_tool',
     'move_emails_by_filter_tool',
+    'save_attachments_tool',
+    'list_local_directory_tool',
 ]

@@ -42,6 +42,8 @@ from . import (
     complete_todo_tool,
     mailbox_stats_tool,
     move_emails_by_filter_tool,
+    save_attachments_tool,
+    list_local_directory_tool,
 )
 
 
@@ -88,3 +90,5 @@ def register_all_tools(mcp_server: FastMCP) -> None:
     mcp_server.tool(complete_todo_tool)
     mcp_server.tool(mailbox_stats_tool)
     mcp_server.tool(move_emails_by_filter_tool)
+    mcp_server.tool(save_attachments_tool)
+    mcp_server.tool(list_local_directory_tool)
