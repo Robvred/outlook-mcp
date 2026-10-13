@@ -45,6 +45,7 @@ from . import (
     move_emails_by_filter_tool,
     save_attachments_tool,
     list_local_directory_tool,
+    list_calendar_events_tool,
 )
 
 
@@ -94,3 +95,6 @@ def register_all_tools(mcp_server: FastMCP) -> None:
     mcp_server.tool(move_emails_by_filter_tool)
     mcp_server.tool(save_attachments_tool)
     mcp_server.tool(list_local_directory_tool)
+
+    # Calendar (read-only)
+    mcp_server.tool(list_calendar_events_tool)

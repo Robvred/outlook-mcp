@@ -246,3 +246,40 @@ def list_local_directory_tool(path: str, depth: int = 2) -> Dict[str, Any]:
         return {"type": "json", "data": list_directory(path, depth)}
     except Exception as e:
         return _err(e)
+
+
+def list_calendar_events_tool(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    days: int = 1,
+    calendar_path: Optional[str] = None,
+    include_body: bool = True,
+    max_body_chars: int = 1500,
+    include_canceled: bool = False,
+    include_declined: bool = False,
+) -> Dict[str, Any]:
+    """Read-only list of calendar events (recurring series expanded) in a date window, sorted by start.
+
+    Does not touch the email cache. Returns per event: subject, start, end, all_day, location, organizer,
+    my_response, busy_status, is_meeting, is_recurring, attendees (required / optional / resources with
+    SMTP addresses), categories, attachments_count, conversation_topic, entry_id and, with include_body,
+    the agenda text (online-meeting join block stripped). Use it to prepare the day's meeting briefs.
+
+    Args:
+        start_date: 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM' local time (default: today 00:00)
+        end_date: Same format; a date alone includes that whole day (default: start + days)
+        days: Window length when end_date is omitted (default 1)
+        calendar_path: Calendar folder path (default: the default calendar)
+        include_body: Include the agenda text (default True)
+        max_body_chars: Agenda text limit per event (default 1500)
+        include_canceled: Include canceled meetings (default False)
+        include_declined: Include meetings I declined (default False)
+    """
+    try:
+        from ..backend.calendar_operations import list_calendar_events
+        return {"type": "json", "data": list_calendar_events(
+            start_date, end_date, days, calendar_path, include_body, max_body_chars,
+            include_canceled, include_declined,
+        )}
+    except Exception as e:
+        return _err(e)
