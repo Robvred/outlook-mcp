@@ -103,6 +103,11 @@ python -c "import win32com.client as w; w.Dispatch('Outlook.Application'); print
 |---|---|
 | `save_attachments_tool` | Save real attachments to a local folder (no overwrite) and create `.url` shortcuts for online file links |
 | `list_local_directory_tool` | List a local folder tree to choose where to file |
+
+### Calendar
+
+| Tool | Purpose |
+|---|---|
 | `list_calendar_events_tool` | Read-only list of calendar events in a date window (recurrences expanded): attendees, organizer, agenda, my response |
 
 ## Operating notes
