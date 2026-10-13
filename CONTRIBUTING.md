@@ -109,3 +109,8 @@ We expect all contributors to adhere to our Code of Conduct. Please be respectfu
 ## 🙏 Thank You!
 
 Your contributions are what make this project great. Thank you for helping improve Outlook MCP Server for everyone! 🎉
+## Anonymization
+
+This repository is public. Read [CLAUDE.md](CLAUDE.md) before contributing: no real names,
+organizations, addresses, folder paths, projects, figures or mailbox content in code, examples,
+commits or pull requests. Use the placeholders listed there.
