@@ -32,7 +32,11 @@ from .backend.email_search.search_common import unified_cache_load_workflow, ext
 from .backend.email_search.parallel_extractor import extract_emails_optimized
 
 # Email composition and operations
-from .backend.email_composition import reply_to_email_by_number, compose_email
+from .backend.email_composition import (
+    compose_email,
+    forward_email_by_number,
+    reply_to_email_by_number,
+)
 
 # Batch operations
 from .backend.batch_operations import batch_forward_emails
@@ -68,6 +72,7 @@ __all__ = [
     'get_email_by_number_unified',
     'format_email_with_media',
     'reply_to_email_by_number',
+    'forward_email_by_number',
     'compose_email',
     
     # Cache management
