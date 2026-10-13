@@ -197,3 +197,52 @@ def move_emails_by_filter_tool(
         )}
     except Exception as e:
         return _err(e)
+
+
+def save_attachments_tool(
+    email_number: int,
+    target_dir: str,
+    name_prefix: str = "",
+    include_inline: bool = False,
+    create_link_shortcuts: bool = True,
+    only_names: Union[str, List[str], None] = None,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Save an email's attachments to a local folder and create .url shortcuts for online file links.
+
+    Real attachments are saved (inline signature images and hidden parts are skipped). Existing files are
+    never overwritten: an identical file (same name and size) is skipped, otherwise " (2)" is appended.
+    Links to SharePoint / OneDrive / Teams / Google Drive / Box / Dropbox files found in the body become
+    Windows .url shortcuts in the same folder. The folder is created if missing.
+
+    Args:
+        email_number: Cache number of the email (1-based)
+        target_dir: Absolute Windows path of the destination folder
+        name_prefix: Optional prefix for saved names, e.g. "2026-10-13 - "
+        include_inline: Also save inline images (default False)
+        create_link_shortcuts: Create .url shortcuts for online file links (default True)
+        only_names: Restrict to these attachment file names
+        dry_run: Preview paths without writing (default False)
+    """
+    try:
+        from ..backend.attachments import save_attachments
+        return {"type": "json", "data": save_attachments(
+            email_number, target_dir, name_prefix, include_inline, create_link_shortcuts,
+            _as_list(only_names), dry_run,
+        )}
+    except Exception as e:
+        return _err(e)
+
+
+def list_local_directory_tool(path: str, depth: int = 2) -> Dict[str, Any]:
+    """List the sub-folders of a local directory (with file counts) to decide where to file attachments.
+
+    Args:
+        path: Absolute Windows path
+        depth: How many levels to list (default 2)
+    """
+    try:
+        from ..backend.attachments import list_directory
+        return {"type": "json", "data": list_directory(path, depth)}
+    except Exception as e:
+        return _err(e)
