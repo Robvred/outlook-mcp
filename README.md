@@ -15,7 +15,9 @@ Fork lineage: [marlonluo2018/outlook-mcp-server](https://github.com/marlonluo201
   to disk never overwrites an existing file.
 - **Audit trail.** Every write (draft, move, category, flag, task, saved attachment) is appended
   to `~/.outlook-mcp/audit.log` on the local machine.
-- **Local only.** The server talks to the Outlook client already running on the machine. What the
+- **Local only by default.** The server talks to the Outlook client already running on the machine
+  and listens to a local client over stdio. An optional token-protected HTTP mode exists for use
+  through an outbound tunnel, see [docs/remote-access.md](docs/remote-access.md). What the
   AI client does with the data it reads depends on that client, not on this server.
 
 ## Requirements
@@ -48,6 +50,13 @@ MCP client configuration (for example Claude Desktop):
 ```
 
 After updating the code, fully quit and restart the MCP client so the server is reloaded.
+
+### Remote access (optional)
+
+The server can also expose a token-protected HTTP endpoint on the loopback interface
+(`--transport http`, `OUTLOOK_MCP_TOKEN`), to be reached from another machine through an
+outbound reverse tunnel on 443. See [docs/remote-access.md](docs/remote-access.md). The
+default remains stdio.
 
 Quick checks:
 
