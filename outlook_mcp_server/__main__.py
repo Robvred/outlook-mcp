@@ -11,10 +11,12 @@ try:
     # When running as module
     from .backend.outlook_session.session_manager import OutlookSessionManager
     from .tools.registration import register_all_tools
+    from .remote import RemoteConfigError, build_token_verifier, load_settings
 except ImportError:
     # When running as script or direct execution
     from outlook_mcp_server.backend.outlook_session.session_manager import OutlookSessionManager
     from outlook_mcp_server.tools.registration import register_all_tools
+    from outlook_mcp_server.remote import RemoteConfigError, build_token_verifier, load_settings
 
 def test_outlook_connection() -> bool:
     """Test Outlook connection before starting the server.
@@ -38,7 +40,18 @@ def main():
     
     This function serves as the entry point for module execution.
     It tests the Outlook connection before starting the MCP server.
+
+    Transport is stdio by default. With ``--transport http`` (or the
+    OUTLOOK_MCP_TRANSPORT environment variable) the server listens on the
+    loopback interface and requires a bearer token on every request. See
+    docs/remote-access.md.
     """
+    try:
+        settings = load_settings()
+    except RemoteConfigError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        sys.exit(2)
+
     try:
         # Test Outlook connection first
         if not test_outlook_connection():
@@ -47,14 +60,23 @@ def main():
         
         print("Outlook connection successful. Starting MCP server...", file=sys.stderr)
         
-        # Initialize FastMCP server
-        mcp = FastMCP("outlook-assistant")
+        # Initialize FastMCP server, with bearer-token auth in HTTP mode
+        auth = build_token_verifier(settings.token) if settings.is_http else None
+        mcp = FastMCP("outlook-assistant", auth=auth)
         
         # Register all MCP tools
         register_all_tools(mcp)
         
         # Run the MCP server
-        mcp.run()
+        if settings.is_http:
+            print(
+                f"Listening on http://{settings.host}:{settings.port}{settings.path} "
+                "(bearer token required)",
+                file=sys.stderr,
+            )
+            mcp.run(transport="http", host=settings.host, port=settings.port, path=settings.path)
+        else:
+            mcp.run()
         
     except KeyboardInterrupt:
         print("\nMCP server stopped by user.", file=sys.stderr)
