@@ -1,0 +1,17 @@
+# Example deployment on the remote host. Copy next to the relay files and adapt.
+# The bridge listener (8080) is meant to sit behind the reverse proxy on 443; the agent
+# listener (8765) is only published on the loopback interface for the local MCP client.
+services:
+  outlook-mcp-relay:
+    build: .
+    container_name: outlook-mcp-relay
+    restart: unless-stopped
+    environment:
+      BRIDGE_TOKEN: "CHANGE_ME_32_CHARACTERS_MINIMUM_________"
+    ports:
+      - "127.0.0.1:8765:8765"
+    # Attach to the reverse proxy's network instead of publishing 8080, e.g.:
+    # networks: [proxy]
+# networks:
+#   proxy:
+#     external: true

@@ -12,11 +12,13 @@ try:
     from .backend.outlook_session.session_manager import OutlookSessionManager
     from .tools.registration import register_all_tools
     from .remote import RemoteConfigError, build_token_verifier, load_settings
+    from .bridge import bridge_settings_from_env, start_bridge_thread
 except ImportError:
     # When running as script or direct execution
     from outlook_mcp_server.backend.outlook_session.session_manager import OutlookSessionManager
     from outlook_mcp_server.tools.registration import register_all_tools
     from outlook_mcp_server.remote import RemoteConfigError, build_token_verifier, load_settings
+    from outlook_mcp_server.bridge import bridge_settings_from_env, start_bridge_thread
 
 def test_outlook_connection() -> bool:
     """Test Outlook connection before starting the server.
@@ -48,6 +50,7 @@ def main():
     """
     try:
         settings = load_settings()
+        bridge_settings = bridge_settings_from_env() if settings.is_http else None
     except RemoteConfigError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
         sys.exit(2)
@@ -74,7 +77,15 @@ def main():
                 "(bearer token required)",
                 file=sys.stderr,
             )
-            mcp.run(transport="http", host=settings.host, port=settings.port, path=settings.path)
+            if bridge_settings is not None:
+                print(f"Starting outbound bridge to {bridge_settings.url}", file=sys.stderr)
+                start_bridge_thread(bridge_settings)
+            # Stateless JSON responses: every request is self-contained, which is what the
+            # bridge/relay path expects and what tool-only clients need.
+            mcp.run(
+                transport="http", host=settings.host, port=settings.port, path=settings.path,
+                stateless_http=True, json_response=True,
+            )
         else:
             mcp.run()
         

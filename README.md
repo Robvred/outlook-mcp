@@ -54,9 +54,10 @@ After updating the code, fully quit and restart the MCP client so the server is 
 ### Remote access (optional)
 
 The server can also expose a token-protected HTTP endpoint on the loopback interface
-(`--transport http`, `OUTLOOK_MCP_TOKEN`), to be reached from another machine through an
-outbound reverse tunnel on 443. See [docs/remote-access.md](docs/remote-access.md). The
-default remains stdio.
+(`--transport http`, `OUTLOOK_MCP_TOKEN`) and connect it, through a single outbound WebSocket
+on 443, to a small relay on a remote host (`relay/`) where another MCP client can use it. All
+of it is Python, no extra binary on the workstation. See
+[docs/remote-access.md](docs/remote-access.md). The default remains stdio.
 
 Quick checks:
 
