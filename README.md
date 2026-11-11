@@ -72,12 +72,13 @@ python -c "import win32com.client as w; w.Dispatch('Outlook.Application'); print
 
 | Tool | Purpose |
 |---|---|
-| `list_recent_emails_tool` | Load the last N days of a folder (max 30) into the cache |
-| `load_emails_by_folder_tool` | Load a folder by period or count |
-| `search_email_by_subject_tool`, `..._by_sender_name_tool`, `..._by_recipient_name_tool`, `..._by_body_tool` | Search and load results into the cache |
-| `view_email_cache_tool` | Page through the cache (5 per page), with categories and flag status |
-| `get_email_by_number_tool` | Read one message, optionally with thread and attachments |
-| `clear_email_cache_tool` | Clear the cache |
+| `search_emails_tool` | Live multi-criteria search (subject, sender, recipient, body, categories, unread, flagged, period, subfolders). Returns the matches directly and makes them the numbered listing |
+| `list_recent_emails_tool` | Load the last N days of a folder (max 30) into the numbered listing |
+| `load_emails_by_folder_tool` | Load a folder by period or count, with categories, flag and unread state |
+| `search_email_by_subject_tool`, `..._by_sender_name_tool`, `..._by_recipient_name_tool`, `..._by_body_tool` | Single-field search (words are AND or OR terms, "quoted text" is a phrase) |
+| `view_email_cache_tool` | Page through the listing (5 per page by default, up to 50), with categories and flag status |
+| `get_email_by_number_tool` | Read one message: plain text by default, HTML on request, optional body size limit |
+| `clear_email_cache_tool` | Clear the listing |
 | `mailbox_stats_tool` | Read-only statistics over up to 730 days (volume, senders, conversation topics), without using the cache |
 
 ### Drafts
@@ -95,7 +96,7 @@ python -c "import win32com.client as w; w.Dispatch('Outlook.Application'); print
 |---|---|
 | `get_folder_list_tool`, `create_folder_tool`, `move_folder_tool`, `remove_folder_tool` | Folder management |
 | `move_email_tool`, `delete_email_by_number_tool` | Move or delete one message |
-| `move_emails_by_filter_tool` | Bulk move by period, subject, sender, excluding categories. Dry run by default, time-boxed batches |
+| `move_emails_by_filter_tool` | Bulk move by period, subject, sender, required categories (`categories`, any or all) and excluded categories. Dry run by default, time-boxed batches |
 | `ensure_categories_tool`, `set_email_categories_tool` | Create categories, tag messages (add, replace, remove, exclusive group) |
 
 ### Follow-up
@@ -122,12 +123,20 @@ python -c "import win32com.client as w; w.Dispatch('Outlook.Application'); print
 
 ## Operating notes
 
-- **One shared cache.** Every load or search replaces the cache; message numbers refer to the last
-  load only. Do not run cache-loading calls in parallel.
+- **Everything is local COM.** Searches, listings and moves are evaluated by the running Outlook
+  client (`Folder.GetTable` / `Items.Restrict`). No Graph or online API is used; Outlook Classic
+  must be open.
+- **Live queries, numbered listing.** Every load or search queries the mailbox at call time and
+  replaces the numbered listing. The listing only holds handles (EntryID and StoreID): content is
+  always read live. Numbers stay valid until the next load or search, including after a move or a
+  delete (the slot is kept, later numbers do not shift).
+- **Categories are exact.** Category criteria match whole category names, case-insensitive, and are
+  re-checked on every message before it is listed or moved. A name missing from the master
+  category list is reported as a warning.
 - **Time limit.** MCP clients usually time out after about 60 s. Long operations are time-boxed;
   repeat the call until it reports nothing remaining.
 - **Matching.** Subject and sender filters are case-insensitive substring matches. Check the dry-run
-  sample before moving.
+  sample and the resolved target path before moving.
 - **Dates.** Due dates and reminders are given in local time (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM`).
 - **Categories.** On Exchange, categories created through COM may disappear from the master list
   after a restart; messages keep their tags. Run `ensure_categories_tool` again or create them once

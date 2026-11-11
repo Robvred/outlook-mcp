@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Union
 # Local application imports
 from ..backend.email_data_extractor import format_email_with_media, get_email_by_number_unified
 from ..backend.outlook_session import OutlookSessionManager
-from ..backend.shared import clear_email_cache, email_cache, email_cache_order
+from ..backend.shared import MAX_CACHE_SIZE, cache_meta, clear_email_cache, email_cache, email_cache_order
 from ..backend.validation import (
     ValidationError,
     validate_cache_available,
@@ -17,212 +17,110 @@ from ..backend.validation import (
 )
 
 
-def view_email_cache_tool(page: int = 1) -> Dict[str, Any]:
-    """View comprehensive information of cached emails (5 emails per page).
-    Shows Subject, From, To, CC, Received, Status, and Attachments.
+_FLAG_LABELS = {0: "", 1: "complete", 2: "flagged"}
+
+
+def _people(recipients: List[Dict[str, Any]]) -> str:
+    if not recipients:
+        return "N/A"
+    shown = ", ".join(r.get("name") or r.get("address") or "Unknown" for r in recipients[:3])
+    return shown + (f" and {len(recipients) - 3} more" if len(recipients) > 3 else "")
+
+
+def listing_row(number: int, email_data: Dict[str, Any]) -> Dict[str, Any]:
+    """One email of the numbered listing, as shown by the view and search tools."""
+    sender = email_data.get("sender", "Unknown")
+    row = {
+        "number": number,
+        "subject": email_data.get("subject", "No Subject"),
+        "from": sender.get("name", "Unknown") if isinstance(sender, dict) else str(sender),
+        "to": _people(email_data.get("to_recipients", [])),
+        "cc": _people(email_data.get("cc_recipients", [])),
+        "received": email_data.get("received_time", "Unknown"),
+        "status": "Unread" if email_data.get("unread", False) else "Read",
+        "attachments_count": len(email_data.get("attachments", [])),
+        "embedded_images_count": email_data.get("embedded_images_count", 0),
+        "categories": email_data.get("categories", "") or "",
+        "flag": _FLAG_LABELS.get(email_data.get("flag_status", 0), ""),
+    }
+    if email_data.get("sender_email"):
+        row["from_email"] = email_data["sender_email"]
+    if email_data.get("folder"):
+        row["folder"] = email_data["folder"]
+    message_class = email_data.get("message_class") or ""
+    if message_class and not message_class.upper().startswith("IPM.NOTE"):
+        row["type"] = message_class
+    return row
+
+
+def listing_rows(start: int, end: int, with_attachments: bool = True) -> List[Dict[str, Any]]:
+    """Rows [start, end) of the listing (0-based), attachment details resolved for these rows only."""
+    ids = email_cache_order[start:end]
+    entries = [email_cache[i] for i in ids if i in email_cache]
+    if with_attachments and any(not e.get("attachments_processed") for e in entries):
+        try:
+            from ..backend.attachments import enrich_attachments
+            with OutlookSessionManager() as session:
+                enrich_attachments(session, entries)
+        except Exception:
+            pass  # the listing is still valid without attachment details
+    return [listing_row(start + offset + 1, email_cache[i]) for offset, i in enumerate(ids) if i in email_cache]
+
+
+def view_email_cache_tool(page: int = 1, page_size: int = 5) -> Dict[str, Any]:
+    """View the emails of the last load or search (numbered listing), page by page.
+
+    Each email shows number, subject, from, to, cc, received (local time), status (Read/Unread),
+    attachments_count (real attachments), embedded_images_count, categories and flag.
+    Numbers are the handles used by the other tools; they stay valid until the next load or search.
 
     Args:
-        page: Page number to view (1-based, each page contains 5 emails)
+        page: Page number (1-based)
+        page_size: Emails per page (default 5, max 50). Use a larger page to review a listing in one call.
 
     Returns:
-        dict: Response containing email previews in JSON format
-        {
-            "type": "json",
-            "data": {
-                "page": 1,
-                "total_pages": 5,
-                "total_emails": 23,
-                "emails": [
-                    {
-                        "number": 1,
-                        "subject": "Email Subject",
-                        "from": "Sender Name",
-                        "to": "Recipient Name",
-                        "cc": "CC Recipient",
-                        "received": "2023-12-21 10:30:00",
-                        "status": "Read",
-                        "attachments_count": 2,
-                        "embedded_images_count": 2
-                    }
-                ]
-            }
-        }
+        dict: {"type": "json", "data": {"page", "total_pages", "total_emails", "listing", "emails": [...]}}
     """
     try:
         validate_page_parameter(page, 0)
     except ValidationError as e:
         raise ValidationError(str(e))
-    
+    if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= 50:
+        raise ValidationError("page_size must be between 1 and 50")
+
     try:
-        if not email_cache_order:
+        total = len(email_cache_order)
+        if not total:
             return {
-                "type": "json", 
+                "type": "json",
                 "data": {
                     "error": "No emails in cache",
                     "message": "Please load emails first using list_recent_emails or search functions."
                 }
             }
-        
-        # Calculate pagination
-        start_idx = (page - 1) * 5
-        end_idx = start_idx + 5
-        total_pages = (len(email_cache_order) + 4) // 5
-        
-        if start_idx >= len(email_cache_order):
+        total_pages = (total + page_size - 1) // page_size
+        start_idx = (page - 1) * page_size
+        if start_idx >= total:
             return {
-                "type": "json", 
+                "type": "json",
                 "data": {
                     "error": "Page out of range",
                     "message": f"Page {page} is out of range. Available range: 1-{total_pages}"
                 }
             }
-        
-        # Get emails for this page
-        page_emails = []
-        for i in range(start_idx, min(end_idx, len(email_cache_order))):
-            email_id = email_cache_order[i]
-            email_data = email_cache.get(email_id, {})
-            if email_data:
-                # Extract comprehensive information
-                sender = email_data.get("sender", "Unknown")
-                if isinstance(sender, dict):
-                    sender_name = sender.get("name", "Unknown")
-                else:
-                    sender_name = str(sender)
-                
-                # Get recipients
-                to_recipients = email_data.get("to_recipients", [])
-                if to_recipients:
-                    to_display = ", ".join([r.get("name", r.get("address", "Unknown")) for r in to_recipients[:3]])
-                    if len(to_recipients) > 3:
-                        to_display += f" and {len(to_recipients) - 3} more"
-                else:
-                    to_display = "N/A"
-                
-                # Get CC recipients
-                cc_recipients = email_data.get("cc_recipients", [])
-                if cc_recipients:
-                    cc_display = ", ".join([r.get("name", r.get("address", "Unknown")) for r in cc_recipients[:3]])
-                    if len(cc_recipients) > 3:
-                        cc_display += f" and {len(cc_recipients) - 3} more"
-                else:
-                    cc_display = "N/A"
-                
-                # Determine status
-                unread = email_data.get("unread", False)
-                status = "Unread" if unread else "Read"
-                
-                # Check attachments and embedded images
-                has_attachments = email_data.get("has_attachments", False)
-                attachments_count = len(email_data.get("attachments", []))
-                
-                # Use cached embedded_images_count if available, otherwise count manually
-                embedded_images_count = email_data.get("embedded_images_count", 0)
-                
-                # Only re-analyze if we don't have embedded_images_count in cache
-                if embedded_images_count == 0 and not email_data.get("attachments_processed", False):
-                    try:
-                        # Try to get entry_id to check for embedded images
-                        entry_id = email_data.get("id", email_data.get("entry_id", ""))
-                        if entry_id:
-                            from ..backend.outlook_session.session_manager import OutlookSessionManager
-                            with OutlookSessionManager() as session:
-                                if session and session.namespace and hasattr(session.namespace, 'GetItemFromID'):
-                                    try:
-                                        item = session.namespace.GetItemFromID(entry_id)
-                                        if hasattr(item, 'Attachments') and item.Attachments:
-                                            for attachment in item.Attachments:
-                                                # Check if it's an embedded image using 4-method detection
-                                                is_embedded = False
-                                                
-                                                # Method 1: Check Content-ID and Content-Location properties
-                                                try:
-                                                    if hasattr(attachment, 'PropertyAccessor'):
-                                                        content_id = attachment.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x3712001F")
-                                                        is_embedded = content_id is not None and len(str(content_id).strip()) > 0
-                                                        
-                                                        if not is_embedded:
-                                                            content_location = attachment.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x3713001F")
-                                                            is_embedded = content_location is not None and len(str(content_location).strip()) > 0
-                                                except:
-                                                    pass
-                                                
-                                                # Method 2: Check attachment type
-                                                attachment_type = getattr(attachment, 'Type', 1)
-                                                if attachment_type in [3, 4]:  # 3 = Embedded, 4 = OLE
-                                                    is_embedded = True
-                                                
-                                                # Method 3: Check for embedded image naming patterns
-                                                file_name = getattr(attachment, 'FileName', '') or getattr(attachment, 'DisplayName', 'Unknown')
-                                                is_image = file_name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.ico'))
-                                                if is_image and not is_embedded:
-                                                    lower_name = file_name.lower()
-                                                    if any(pattern in lower_name for pattern in ['image', 'img', 'cid:', 'embedded']):
-                                                        is_embedded = True
-                                                    elif '.' in lower_name:
-                                                        name_without_ext = lower_name.rsplit('.', 1)[0]
-                                                        if name_without_ext.isdigit() or (len(name_without_ext) <= 2 and name_without_ext.isalnum()):
-                                                            is_embedded = True
-                                                
-                                                # Method 4: Check attachment size
-                                                if is_image and not is_embedded:
-                                                    try:
-                                                        attachment_size = getattr(attachment, 'Size', 0)
-                                                        if attachment_size > 0 and attachment_size < 10000:  # Less than 10KB
-                                                            is_embedded = True
-                                                    except:
-                                                        pass
-                                                
-                                                # Document files are always real attachments
-                                                is_document = file_name.lower().endswith(('.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.zip', '.rar'))
-                                                if is_document:
-                                                    is_embedded = False
-                                                
-                                                # Count embedded images that are not already in the attachments list
-                                                if is_embedded:
-                                                    # Check if this embedded image is not already counted as a real attachment
-                                                    is_real_attachment = False
-                                                    for real_attachment in email_data.get("attachments", []):
-                                                        if real_attachment.get("name", "") == file_name:
-                                                            is_real_attachment = True
-                                                            break
-                                                    
-                                                    if not is_real_attachment:
-                                                        embedded_images_count += 1
-                                    except:
-                                        pass
-                    except:
-                        pass
-                
-                # Store embedded images count directly
-                page_emails.append({
-                    "number": i + 1,
-                    "subject": email_data.get("subject", "No Subject"),
-                    "from": sender_name,
-                    "to": to_display,
-                    "cc": cc_display,
-                    "received": email_data.get("received_time", "Unknown"),
-                    "status": status,
-                    "attachments_count": attachments_count,
-                    "embedded_images_count": embedded_images_count,
-                    "categories": email_data.get("categories", ""),
-                    "flag": {0: "", 1: "complete", 2: "flagged"}.get(email_data.get("flag_status", 0), "")
-                })
-        
-        # Return JSON format
         return {
             "type": "json",
             "data": {
                 "page": page,
                 "total_pages": total_pages,
-                "total_emails": len(email_cache_order),
-                "emails": page_emails
+                "total_emails": total,
+                "listing": dict(cache_meta),
+                "emails": listing_rows(start_idx, min(start_idx + page_size, total)),
             }
         }
-        
     except Exception as e:
         return {
-            "type": "json", 
+            "type": "json",
             "data": {
                 "error": "Error viewing email cache",
                 "message": str(e)
@@ -230,12 +128,12 @@ def view_email_cache_tool(page: int = 1) -> Dict[str, Any]:
         }
 
 
-def get_email_by_number_tool(email_number: int, mode: str = "basic", include_attachments: bool = True, embed_images: bool = True) -> Dict[str, Any]:
+def get_email_by_number_tool(email_number: int, mode: str = "basic", include_attachments: bool = True, embed_images: bool = True, max_body_chars: Optional[int] = None) -> Dict[str, Any]:
     """Get email content by cache number with 3 retrieval modes.
     
     Mode Selection Guide:
-    - "basic": Full text content without embedded images and attachments - use for text-focused viewing
-    - "enhanced": Full content + complete thread + HTML + attachments - use for complete analysis  
+    - "basic": Plain-text body with headers, categories and attachment names (no HTML) - default, cheapest
+    - "enhanced": Same plus the raw HTML body - only when the markup itself is needed
     - "lazy": Auto-adapts cached vs live data - use when unsure
     
     Email Thread Handling:
@@ -250,6 +148,7 @@ def get_email_by_number_tool(email_number: int, mode: str = "basic", include_att
         mode: "basic" (text-only), "enhanced" (complete), "lazy" (adaptive)
         include_attachments: Include file content (enhanced mode only)
         embed_images: Embed inline images as data URIs (enhanced mode only)
+        max_body_chars: Truncate the body to this many characters (default: no limit)
 
     Returns:
         dict: Response containing email details based on requested mode
@@ -285,7 +184,7 @@ def get_email_by_number_tool(email_number: int, mode: str = "basic", include_att
             }
         
         # Format the email with media
-        formatted_email = format_email_with_media(email_data)
+        formatted_email = format_email_with_media(email_data, max_body_chars=max_body_chars)
         return {"type": "text", "text": formatted_email}
         
     except ValidationError as e:
@@ -312,12 +211,9 @@ def load_emails_by_folder_tool(folder_path: str, days: int = None, max_emails: i
         dict: Response containing email count message
 
     Note:
-        Maximum 30 emails for Inbox folder
-        Maximum 1000 emails for other folders
-        Supports nested folder paths (e.g., "user@company.com/Inbox/SubFolder1/SubFolder2")
-        
-        IMPORTANT: Folder paths must include the email address as the root folder.
-        Use format: "user@company.com/Inbox/SubFolder" not just "Inbox/SubFolder"
+        Loaded emails carry their categories, flag status and unread state (shown by view_email_cache_tool).
+        At most 1000 emails are loaded, newest first; the message says when more exist.
+        Folder paths: "user@company.com/Inbox/SubFolder1" or, for the default mailbox, "Inbox/SubFolder1".
         
         Usage examples:
         - Time-based: load_emails_by_folder_tool("Inbox", days=7)
@@ -350,18 +246,15 @@ def load_emails_by_folder_tool(folder_path: str, days: int = None, max_emails: i
         return {"type": "text", "text": f"Validation error: {str(e)}"}
     
     try:
-        # Determine max_emails based on parameters
-        if max_emails is not None:
-            # Number-based loading: use specified max_emails
-            actual_max_emails = min(max_emails, 1000)  # Cap at 1000
-        else:
-            # Time-based loading: use a very high limit to get all emails in the date range
-            # This ensures we respect the days parameter strictly without expanding the date range
-            actual_max_emails = 10000  # High limit to capture all emails in the specified date range
-
+        # Number-based: the N most recent. Time-based: everything in the window, up to the listing size.
+        actual_max_emails = min(max_emails, MAX_CACHE_SIZE) if max_emails is not None else MAX_CACHE_SIZE
         with OutlookSessionManager() as outlook_session:
-            email_list, message = outlook_session.get_folder_emails(validated_folder, actual_max_emails, fast_mode=True, days_filter=days if max_emails is None else None)
-            return {"type": "text", "text": message + ". Use 'view_email_cache_tool' to view them."}
+            email_list, message = outlook_session.get_folder_emails(
+                validated_folder, actual_max_emails, fast_mode=True,
+                days_filter=days if max_emails is None else None)
+        if message.startswith("Error"):
+            return {"type": "text", "text": message}
+        return {"type": "text", "text": message + ". Use 'view_email_cache_tool' to view them."}
     except Exception as e:
         return {"type": "text", "text": f"Error loading emails from folder: {str(e)}"}
 

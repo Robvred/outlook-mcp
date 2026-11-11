@@ -32,8 +32,13 @@ class OutlookSessionManager:
         self._folder_operations: Optional[FolderOperations] = None
 
     def __enter__(self) -> "OutlookSessionManager":
-        """Initialize Outlook COM objects."""
-        self._connect()
+        """Initialize Outlook COM objects (retried when Outlook is busy)."""
+        try:
+            self._connect()
+        except ConnectionError:
+            raise
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to Outlook: {str(e)}") from e
         return self
 
     def __exit__(self, exc_type: Optional[type], exc_val: Optional[Exception], exc_tb: Optional[Any]) -> bool:
@@ -51,7 +56,12 @@ class OutlookSessionManager:
             self.namespace = self.outlook.GetNamespace("MAPI")
             self._folder_operations = FolderOperations(self)
             self._connected = True
-            logger.info("Successfully connected to Outlook")
+            logger.debug("Successfully connected to Outlook")
+        except pythoncom.com_error as e:
+            # Left as a COM error so that the retry decorator can try again.
+            logger.warning(f"Connection error: {str(e)}")
+            self._cleanup_partial_connection()
+            raise
         except Exception as e:
             logger.error(f"Connection error: {str(e)}")
             self._cleanup_partial_connection()

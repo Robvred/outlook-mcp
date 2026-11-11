@@ -12,6 +12,7 @@ import pytest
 for _name in ("pythoncom", "pywintypes", "win32com", "win32com.client", "win32api", "win32con"):
     sys.modules.setdefault(_name, mock.MagicMock(name=_name))
 
+from outlook_mcp_server.backend import com_helpers  # noqa: E402
 from outlook_mcp_server.backend import email_composition as ec  # noqa: E402
 from outlook_mcp_server.backend.com_helpers import OL_CC, OL_TO  # noqa: E402
 from outlook_mcp_server.backend.validators import EmailForwardParams, EmailReplyParams  # noqa: E402
@@ -107,6 +108,8 @@ def outlook(monkeypatch):
     monkeypatch.setattr(ec, "OutlookSessionManager", FakeSession)
     monkeypatch.setattr(ec, "email_cache_order", ["ID-1"])
     monkeypatch.setattr(ec, "email_cache", {"ID-1": {"id": "ID-1"}})
+    monkeypatch.setattr(com_helpers, "email_cache_order", ["ID-1"])
+    monkeypatch.setattr(com_helpers, "email_cache", {"ID-1": {"id": "ID-1"}})
     monkeypatch.setattr(ec, "log_event", lambda *a, **k: None)
     return holder
 

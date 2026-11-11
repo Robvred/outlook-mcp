@@ -13,6 +13,7 @@ from .com_helpers import (
     OL_CC,
     OL_TO,
     describe_recipients,
+    get_item_by_number,
     insert_html_at_top,
     text_to_html,
 )
@@ -76,20 +77,9 @@ def reply_to_email_by_number(
         logger.error(f"Validation error in reply_to_email_by_number: {e}")
         raise ValueError(f"Invalid parameters: {e}")
 
-    # Get the entry_id from the cache order
-    entry_id = email_cache_order[email_number - 1]
-    if not entry_id:
-        raise ValueError(f"Email #{email_number} has no entry ID")
-
-    # Get the cached email data
-    cached_email = email_cache.get(entry_id)
-    if not cached_email:
-        raise ValueError(f"Email #{email_number} data not found in cache")
-
     with OutlookSessionManager() as session:
         try:
-            email_id = cached_email.get("id") or cached_email.get("entry_id") or entry_id
-            email = session.namespace.GetItemFromID(email_id)
+            email = get_item_by_number(session, email_number)
             if not email:
                 raise RuntimeError("Could not retrieve the email from Outlook.")
 
@@ -199,17 +189,9 @@ def forward_email_by_number(
         logger.error(f"Validation error in forward_email_by_number: {e}")
         raise ValueError(f"Invalid parameters: {e}")
 
-    entry_id = email_cache_order[email_number - 1]
-    if not entry_id:
-        raise ValueError(f"Email #{email_number} has no entry ID")
-    cached_email = email_cache.get(entry_id)
-    if not cached_email:
-        raise ValueError(f"Email #{email_number} data not found in cache")
-
     with OutlookSessionManager() as session:
         try:
-            email_id = cached_email.get("id") or cached_email.get("entry_id") or entry_id
-            email = session.namespace.GetItemFromID(email_id)
+            email = get_item_by_number(session, email_number)
             if not email:
                 raise RuntimeError("Could not retrieve the email from Outlook.")
 

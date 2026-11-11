@@ -74,6 +74,59 @@ def _is_inline(att: Any) -> bool:
         return False
 
 
+def summarize_attachments(item: Any) -> Dict[str, Any]:
+    """Real attachments (name, size, type) and the count of inline images of an item.
+
+    Same rule as save_attachments: hidden parts and inline images are not attachments.
+    """
+    real: List[Dict[str, Any]] = []
+    inline = 0
+    try:
+        atts = item.Attachments
+        count = atts.Count
+    except Exception:
+        return {"attachments": [], "embedded_images_count": 0}
+    for i in range(1, count + 1):
+        try:
+            att = atts.Item(i)
+            if _is_inline(att):
+                inline += 1
+                continue
+            real.append({
+                "name": getattr(att, "FileName", "") or getattr(att, "DisplayName", "") or f"attachment_{i}",
+                "size": getattr(att, "Size", 0) or 0,
+                "type": getattr(att, "Type", 1),
+            })
+        except Exception as e:
+            logger.debug(f"Attachment {i} unreadable: {e}")
+    return {"attachments": real, "embedded_images_count": inline}
+
+
+def enrich_attachments(session: Any, entries: List[Dict[str, Any]], time_budget_s: float = 8.0) -> None:
+    """Fill the attachment details of listing rows in place (only rows flagged with attachments)."""
+    import time
+
+    from .com_helpers import get_item
+
+    deadline = time.monotonic() + time_budget_s
+    for entry in entries:
+        if entry.get("attachments_processed"):
+            continue
+        if not entry.get("has_attachments"):
+            entry.update({"attachments": [], "embedded_images_count": 0, "attachments_processed": True})
+            continue
+        if time.monotonic() > deadline:
+            break
+        try:
+            summary = summarize_attachments(get_item(session, entry["entry_id"], entry.get("store_id")))
+        except Exception as e:
+            logger.debug(f"Attachment details unavailable: {e}")
+            continue
+        entry.update(summary)
+        entry["has_attachments"] = bool(summary["attachments"])
+        entry["attachments_processed"] = True
+
+
 def extract_online_links(html_body: str, text_body: str) -> List[Dict[str, str]]:
     links: Dict[str, str] = {}
     for href, label in ANCHOR.findall(html_body or ""):

@@ -17,6 +17,7 @@ from . import (
     search_email_by_sender_name_tool,
     search_email_by_recipient_name_tool,
     search_email_by_body_tool,
+    search_emails_tool,
     
     # Viewing tools
     view_email_cache_tool,
@@ -67,6 +68,7 @@ def register_all_tools(mcp_server: FastMCP) -> None:
     mcp_server.tool(search_email_by_sender_name_tool)
     mcp_server.tool(search_email_by_recipient_name_tool)
     mcp_server.tool(search_email_by_body_tool)
+    mcp_server.tool(search_emails_tool)
     
     # Viewing tools
     mcp_server.tool(view_email_cache_tool)

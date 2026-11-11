@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from .shared import email_cache_order
+from .shared import email_cache, email_cache_order
 
 # Outlook "no date" sentinel (4501-01-01)
 _NO_DATE_YEAR = 4501
@@ -16,14 +16,44 @@ OL_TO = 1
 OL_CC = 2
 
 
-def get_item_by_number(session: Any, email_number: int) -> Any:
-    """Return the live Outlook item for a cache number (1-based)."""
+def cached_entry(email_number: int) -> Dict[str, Any]:
+    """Cache row for a 1-based number, with at least 'entry_id' (and 'store_id' when known)."""
     if not email_cache_order:
         raise ValueError("No emails loaded in cache. Load a folder or search first.")
+    if isinstance(email_number, bool) or not isinstance(email_number, int):
+        raise ValueError("Email number must be an integer")
     if email_number < 1 or email_number > len(email_cache_order):
         raise ValueError(f"Email #{email_number} not in cache (1..{len(email_cache_order)})")
     entry_id = email_cache_order[email_number - 1]
-    item = session.namespace.GetItemFromID(entry_id)
+    data = dict(email_cache.get(entry_id) or {})
+    data["entry_id"] = entry_id
+    return data
+
+
+def get_item(session: Any, entry_id: str, store_id: Optional[str] = None) -> Any:
+    """Open an item by EntryID, with its StoreID when known (needed outside the default store)."""
+    namespace = session.namespace
+    item = None
+    if store_id:
+        try:
+            item = namespace.GetItemFromID(entry_id, store_id)
+        except Exception:
+            item = None
+    if item is None:
+        item = namespace.GetItemFromID(entry_id)
+    return item
+
+
+def get_item_by_number(session: Any, email_number: int) -> Any:
+    """Return the live Outlook item for a cache number (1-based)."""
+    entry = cached_entry(email_number)
+    try:
+        item = get_item(session, entry["entry_id"], entry.get("store_id"))
+    except Exception as e:
+        raise ValueError(
+            f"Email #{email_number} is no longer reachable in Outlook (moved or deleted outside "
+            f"this listing?). Reload the folder or search again. Detail: {e}"
+        )
     if not item:
         raise ValueError(f"Email #{email_number} could not be retrieved from Outlook")
     return item

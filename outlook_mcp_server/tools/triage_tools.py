@@ -172,8 +172,10 @@ def move_emails_by_filter_tool(
     exclude_categories: Union[str, List[str], None] = None,
     older_than_days: Optional[int] = None,
     dry_run: bool = True,
+    categories: Union[str, List[str], None] = None,
+    categories_match: str = "any",
 ) -> Dict[str, Any]:
-    """Move emails matching criteria from a folder to another, in bulk (server-side filter, cache untouched).
+    """Move emails matching criteria from a folder to another, in bulk (live filter in Outlook, cache untouched).
 
     Criteria are combined with AND; values inside a list are OR. Matching is "contains", case-insensitive.
     Each call is time-boxed (~45s): re-run with the same arguments until "remaining" is 0.
@@ -188,12 +190,19 @@ def move_emails_by_filter_tool(
         exclude_categories: Skip emails carrying one of these categories, e.g. ["Action", "Attente"]
         older_than_days: Only emails older than N days
         dry_run: True (default) to preview, False to move
+        categories: Keep only emails carrying one of these categories, e.g. ["Done"]. Category names
+                    are matched exactly (case-insensitive) and re-checked on every email before moving.
+        categories_match: "any" (default: at least one of the categories) or "all" (every one of them)
+
+    Returns "matched" (emails selected), "moved", "remaining", "failed", a "sample" and the resolved
+    "source" and "target" paths. Check the dry-run sample and the target before moving.
     """
     try:
         from ..backend.bulk_move import move_by_filter
         return {"type": "json", "data": move_by_filter(
             target_folder, source_folder, days, _as_list(subject_contains), _as_list(sender_contains),
             _as_list(exclude_categories), older_than_days, dry_run,
+            categories=_as_list(categories), categories_match=categories_match,
         )}
     except Exception as e:
         return _err(e)
