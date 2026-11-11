@@ -44,6 +44,7 @@ ENV_URL = "OUTLOOK_MCP_BRIDGE_URL"
 ENV_TOKEN = "OUTLOOK_MCP_BRIDGE_TOKEN"
 ENV_HEADERS = "OUTLOOK_MCP_BRIDGE_HEADERS"
 ENV_TARGET = "OUTLOOK_MCP_BRIDGE_TARGET"
+ENV_CA = "OUTLOOK_MCP_BRIDGE_CA"
 
 MAX_BODY_BYTES = 16 * 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 120.0
@@ -62,6 +63,7 @@ class BridgeSettings:
     token: str = field(repr=False)
     target: str = f"http://{DEFAULT_HOST}:{DEFAULT_PORT}"
     headers: Dict[str, str] = field(default_factory=dict, repr=False)
+    ca_bundle: Optional[str] = None
 
     def validate(self) -> None:
         if not self.url.startswith(("wss://", "ws://")):
@@ -72,6 +74,8 @@ class BridgeSettings:
             raise RemoteConfigError(
                 f"Bridge token missing or shorter than {MIN_TOKEN_LENGTH} characters. Set {ENV_TOKEN}."
             )
+        if self.ca_bundle and not os.path.isfile(self.ca_bundle):
+            raise RemoteConfigError(f"CA bundle not found: '{self.ca_bundle}'.")
         if not self.target.startswith("http://") or not _url_host_is_loopback(self.target):
             raise RemoteConfigError(
                 f"Bridge target must be an http:// URL on the loopback interface, got '{self.target}'. "
@@ -117,6 +121,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Extra header sent on the WebSocket handshake (reverse-proxy access tokens). Repeatable. Env: {ENV_HEADERS} ('Name: v; Other: w').",
     )
     parser.add_argument("--target", default=None, help=f"Local MCP server base URL. Default http://{DEFAULT_HOST}:{DEFAULT_PORT}. Env: {ENV_TARGET}.")
+    parser.add_argument(
+        "--ca-bundle", default=None,
+        help=f"PEM file with extra trusted CA certificates for the relay connection (for example a corporate "
+        f"root CA exported from the Windows certificate store). Env: {ENV_CA}.",
+    )
     return parser
 
 
@@ -134,6 +143,7 @@ def load_bridge_settings(argv: Optional[Sequence[str]] = None, environ: Optional
         token=args.token or env.get(ENV_TOKEN) or "",
         target=args.target or env.get(ENV_TARGET) or f"http://{DEFAULT_HOST}:{DEFAULT_PORT}",
         headers=headers,
+        ca_bundle=args.ca_bundle or env.get(ENV_CA) or None,
     )
     settings.validate()
     return settings
@@ -145,6 +155,32 @@ def bridge_settings_from_env(environ: Optional[dict] = None) -> Optional[BridgeS
     if not env.get(ENV_URL):
         return None
     return load_bridge_settings([], env)
+
+
+def build_ssl_context(ca_bundle: Optional[str] = None):
+    """TLS context for the outbound connection.
+
+    Verification is never disabled. When the ``truststore`` package is installed the
+    operating system's certificate store is used (on Windows: the same roots as the browser
+    and curl.exe, including corporate roots pushed by group policy, with fetching of missing
+    intermediates). Otherwise Python's default store is used. A PEM bundle can be added on
+    top in both cases.
+    """
+    import ssl
+
+    try:
+        import truststore
+
+        context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        source = "operating system certificate store"
+    except ImportError:
+        context = ssl.create_default_context()
+        source = "Python default certificate store"
+    if ca_bundle:
+        context.load_verify_locations(cafile=ca_bundle)
+        source += f" + {ca_bundle}"
+    logger.info("TLS verification uses the %s", source)
+    return context
 
 
 def _clean_headers(headers: Dict[str, str]) -> Dict[str, str]:
@@ -231,6 +267,7 @@ async def run_bridge(settings: BridgeSettings, stop: Optional[asyncio.Event] = N
 
     handshake_headers = dict(settings.headers)
     handshake_headers["Authorization"] = f"Bearer {settings.token}"
+    ssl_context = build_ssl_context(settings.ca_bundle) if settings.url.startswith("wss://") else None
     delay = RECONNECT_MIN_SECONDS
 
     async with httpx.AsyncClient() as client:
@@ -238,7 +275,7 @@ async def run_bridge(settings: BridgeSettings, stop: Optional[asyncio.Event] = N
             try:
                 logger.info("Connecting to relay %s", settings.url)
                 async with connect(
-                    settings.url, additional_headers=handshake_headers,
+                    settings.url, additional_headers=handshake_headers, ssl=ssl_context,
                     ping_interval=20, ping_timeout=20, max_size=MAX_BODY_BYTES + 4096,
                 ) as ws:
                     logger.info("Connected to relay; replaying requests to %s", settings.target)
@@ -249,6 +286,11 @@ async def run_bridge(settings: BridgeSettings, stop: Optional[asyncio.Event] = N
                 raise
             except Exception as exc:
                 logger.warning("Relay connection failed: %s", exc)
+                if "CERTIFICATE_VERIFY_FAILED" in str(exc):
+                    logger.warning(
+                        "TLS verification failed. Install 'truststore' to use the Windows certificate "
+                        "store, or point %s at a PEM file with the missing root CA.", ENV_CA,
+                    )
             if stop and stop.is_set():
                 break
             sleep_for = delay + random.uniform(0, delay / 2)
