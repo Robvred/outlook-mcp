@@ -21,6 +21,7 @@ from .search_tools import (
     search_email_by_sender_name_tool,
     search_email_by_recipient_name_tool,
     search_email_by_body_tool,
+    search_emails_tool,
 )
 
 from .viewing_tools import (
@@ -67,6 +68,7 @@ __all__ = [
     'search_email_by_sender_name_tool',
     'search_email_by_recipient_name_tool',
     'search_email_by_body_tool',
+    'search_emails_tool',
     
     # Viewing tools
     'view_email_cache_tool',

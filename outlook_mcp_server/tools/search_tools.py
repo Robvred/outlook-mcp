@@ -1,7 +1,7 @@
 """Email search tools for Outlook MCP Server."""
 
 # Type imports
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 # Local application imports
 from ..backend import email_search
@@ -206,13 +206,12 @@ def search_email_by_body_tool(
     This function searches the email body content. It does not search in the subject,
     sender name, recipients, or other fields.
 
-    Note: Searching email body is slower than searching other fields as it requires
-    loading the full content of each email.
+    Note: Searching email body is slower than searching other fields: keep the period short.
 
     Args:
         search_term: Plain text search term (colons are allowed as part of regular text)
-                    For exact phrase matching, enclose the term in quotes (e.g., "red hat partner day")
-                    For word-based matching, use the term without quotes (e.g., red hat partner day)
+                    For exact phrase matching, enclose the term in quotes (e.g., "project a status")
+                    For word-based matching, use the term without quotes (e.g., project a status)
         days: Number of days to look back (1-30, default: 7, max: 30)
         folder_name: Optional folder name to search (default: Inbox, or use full path like "user@company.com/Inbox/SubFolder")
         match_all: If True, requires ALL search terms to match (AND logic, default).
@@ -246,3 +245,113 @@ def search_email_by_body_tool(
         folder_name=validated_folder,
         match_all=match_all
     )
+
+
+def _terms(value: Union[str, List[str], None]) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = value.replace(",", ";").split(";")
+    return [str(v).strip() for v in value if str(v).strip()]
+
+
+def search_emails_tool(
+    subject_contains: Union[str, List[str], None] = None,
+    sender_contains: Union[str, List[str], None] = None,
+    recipient_contains: Union[str, List[str], None] = None,
+    body_contains: Union[str, List[str], None] = None,
+    categories: Union[str, List[str], None] = None,
+    exclude_categories: Union[str, List[str], None] = None,
+    unread_only: bool = False,
+    flagged_only: bool = False,
+    days: Optional[int] = 30,
+    older_than_days: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    folder_path: Optional[str] = None,
+    include_subfolders: bool = False,
+    require_all_terms: bool = False,
+    categories_match: str = "any",
+    max_results: int = 200,
+    limit: int = 25,
+) -> Dict[str, Any]:
+    """Search emails live in Outlook with combined criteria and return the matches directly.
+
+    The search runs on the mailbox itself at call time (not on a previous listing). Criteria are
+    combined with AND; values inside a list are OR (AND with require_all_terms). Matching is
+    "contains", case-insensitive. Results are newest first and become the numbered listing used by
+    the other tools (read, reply, move, categories, flag): numbers stay valid until the next load or search.
+    Same criteria vocabulary as move_emails_by_filter_tool.
+
+    Args:
+        subject_contains: Subject must contain one of these terms
+        sender_contains: Sender name or address must contain one of these terms
+        recipient_contains: A To/Cc display name must contain one of these terms
+        body_contains: Body must contain one of these terms (slower: keep the period short)
+        categories: Only emails carrying one of these categories (all of them with categories_match="all")
+        exclude_categories: Skip emails carrying one of these categories
+        unread_only: Only unread emails
+        flagged_only: Only emails flagged for follow-up (not completed)
+        days: Only emails received in the last N days (default 30; None = no lower bound)
+        older_than_days: Only emails older than N days
+        date_from: 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM' local time, inclusive (alternative to days)
+        date_to: Same format; a date alone includes that whole day
+        folder_path: Folder to search (default Inbox), e.g. "user@company.com/Inbox/ProjectA"
+        include_subfolders: Also search the subfolders
+        require_all_terms: Every term of a list must match instead of any
+        categories_match: "any" (default) or "all"
+        max_results: Matches kept in the numbered listing (default 200, max 1000)
+        limit: Matches returned in this response (default 25, max 100); page the rest with view_email_cache_tool
+
+    Returns:
+        dict: {"type": "json", "data": {"total_matched", "listed", "returned", "truncated", "emails": [...]}}
+    """
+    from datetime import timedelta
+
+    from ..backend.com_helpers import parse_dt
+    from ..backend.email_search.search_common import query_to_cache
+    from ..backend.mail_query import MailCriteria
+    from .viewing_tools import listing_rows
+
+    try:
+        if categories_match not in ("any", "all"):
+            raise ValueError("categories_match must be 'any' or 'all'")
+        start = parse_dt(date_from)
+        end = parse_dt(date_to)
+        if end is not None and ":" not in date_to:
+            end += timedelta(days=1)  # date only: include the whole day
+        if start is not None or end is not None:
+            days = None  # explicit dates replace the default look-back
+        criteria = MailCriteria(
+            days=days, older_than_days=older_than_days, received_from=start, received_to=end,
+            subject=_terms(subject_contains), sender=_terms(sender_contains),
+            recipient=_terms(recipient_contains), body=_terms(body_contains),
+            match_all_terms=bool(require_all_terms), categories=_terms(categories),
+            categories_match_all=categories_match == "all", exclude_categories=_terms(exclude_categories),
+            unread_only=bool(unread_only), flagged_only=bool(flagged_only),
+        )
+        max_results = max(1, min(int(max_results), 1000))
+        limit = max(1, min(int(limit), 100))
+        folder = validate_folder_name(folder_path)
+        label = get_folder_path_safe(folder)
+        result = query_to_cache(folder, criteria, f"search in {label}", max_results=max_results,
+                                include_subfolders=bool(include_subfolders))
+        data: Dict[str, Any] = {
+            "folder": label,
+            "criteria": criteria.describe(),
+            "total_matched": result.total_matched,
+            "listed": len(result.emails),
+            "returned": min(limit, len(result.emails)),
+            "truncated": result.truncated,
+            "emails": listing_rows(0, min(limit, len(result.emails))),
+        }
+        if include_subfolders:
+            data["folders_searched"] = len(result.folders)
+        if result.warnings:
+            data["warnings"] = result.warnings
+        if len(result.emails) > limit:
+            data["next"] = "More matches are in the listing: use view_email_cache_tool (page_size up to 50)."
+        return {"type": "json", "data": data}
+    except Exception as e:
+        logger.error(f"Error in search_emails_tool: {e}")
+        return {"type": "text", "text": f"Error searching emails: {e}"}

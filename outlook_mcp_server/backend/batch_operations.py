@@ -7,7 +7,7 @@ import csv
 from .audit import log_event
 from .logging_config import get_logger
 from .outlook_session.session_manager import OutlookSessionManager
-from .shared import email_cache
+from .com_helpers import cached_entry, get_item
 from .utils import safe_encode_text
 from .validation import (
     BatchLimits,
@@ -33,12 +33,10 @@ def batch_forward_emails(email_number: int, csv_path: str, custom_text: str = ""
     if not isinstance(custom_text, str):
         raise ValidationError("Custom text must be a string")
 
-    if not email_cache:
-        raise ValidationError("No emails available - please list emails first.")
-
-    cache_items = list(email_cache.values())
-    if not 1 <= email_number <= len(cache_items):
-        raise ValidationError(f"Email #{email_number} not found in current listing.")
+    try:
+        email_data = cached_entry(email_number)
+    except ValueError as e:
+        raise ValidationError(str(e))
 
     try:
         # Clean and validate CSV path
@@ -78,12 +76,7 @@ def batch_forward_emails(email_number: int, csv_path: str, custom_text: str = ""
         results = []
 
         with OutlookSessionManager() as session:
-            # Get email data from cache - use entry_id instead of id
-            email_data = cache_items[email_number - 1]
-            email_id = email_data.get("entry_id") or email_data.get("id")
-            if not email_id:
-                raise ValidationError(f"Email #{email_number} does not have a valid ID field")
-            template = session.namespace.GetItemFromID(email_id)
+            template = get_item(session, email_data["entry_id"], email_data.get("store_id"))
 
             for i, batch in enumerate(batches, 1):
                 try:

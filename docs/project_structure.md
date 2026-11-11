@@ -40,7 +40,9 @@ This is the heart of the system, implementing email extraction, listing, cache h
 - **email_data_extractor.py** – Extracts fields from Outlook MailItem objects.
 - **email_metadata.py** – Metadata handling utilities.
 - **email_utils.py** – Common Outlook email helpers.
-- **shared.py** – Disk+memory email cache system.
+- **mail_query.py** – Live query engine (DASL filter, Outlook Table API with Items.Restrict fallback) used by listing, search and bulk move.
+- **bulk_move.py** – Bulk move by criteria, built on mail_query.
+- **shared.py** – Numbered listing of the last load or search (handles only, stable numbering).
 - **utils.py** – General helpers (filters, DASL building, retry decorator, etc.).
 - **validators.py** – Pydantic validation models for tool inputs.
 - **validation.py** – Unified validation utilities with custom ValidationError exception for search terms, email addresses, folder names, and more.
@@ -55,11 +57,9 @@ Implements specialized search logic and optimized email listing techniques.
 - **recipient_search.py** – Search by recipient.
 - **sender_search.py** – Search by sender.
 - **subject_search.py** – Subject‑based searching.
-- **email_listing.py** – Optimized listing using Restrict, sorting, and iteration.
-- **search_common.py** – Shared extraction and DASL helpers.
-- **parallel_extractor.py** – ThreadPool‑based parallel extraction logic.
-- **server_search.py** – Server‑side filtering helpers.
-- **unified_search.py** – Unified entry point for consolidated search logic.
+- **email_listing.py** – Recent emails of a folder (through mail_query).
+- **search_common.py** – Query-to-listing helpers shared by the search functions.
+- **unified_search.py** – Single entry point of the field searches.
 
 ---
 
@@ -97,11 +97,8 @@ Current repository includes only **unit tests**:
 - **test_config.py** – Comprehensive test suite for configuration constants covering cache, connection, performance, display, batch, outlook, email format, attachment, and email metadata configurations.
 - **test_validation.py** – Extensive unit tests for validation functions ensuring robustness against various input scenarios including search terms, email addresses, folder names, and custom ValidationError exception handling.
 - **test_shared.py** – Cache management tests including adding, retrieving, and cleaning up emails in the cache with enhanced edge case handling.
-- **test_direct_search.py**
-- **test_early_termination_fix.py**
-- **test_final_search.py**
-- **test_search.py**
-- **check_cache.py**
+- **test_mail_query.py** – Query engine, bulk move, stable numbering and tools against a fake Outlook (`fakes.py`).
+- **conftest.py** (in `tests/`) – Stubs the Windows COM modules so the suite runs on any OS.
 
 ### tests/integration/**
 (Currently empty)
