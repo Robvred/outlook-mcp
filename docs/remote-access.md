@@ -92,6 +92,7 @@ Settings come from environment variables, overridable by command-line flags.
 | `OUTLOOK_MCP_BRIDGE_TOKEN` | none | Same value as the relay's `BRIDGE_TOKEN` |
 | `OUTLOOK_MCP_BRIDGE_HEADERS` | none | Reverse-proxy headers, `Name: value; Other: value` |
 | `OUTLOOK_MCP_BRIDGE_TARGET` | `http://127.0.0.1:8765` | Local server. Must be a loopback `http://` URL |
+| `OUTLOOK_MCP_BRIDGE_CA` | none | PEM file with extra trusted root CAs for the relay connection |
 
 Generate tokens (one for the MCP server, one shared with the relay):
 
@@ -137,6 +138,12 @@ Behaviour and guardrails:
   list.
 - If the workstation uses an explicit HTTP proxy, set `HTTPS_PROXY`; the WebSocket client
   honours it.
+- TLS verification is never disabled. On Windows the bridge verifies the relay's certificate
+  against the operating system store (via `truststore`), the same roots curl.exe and the
+  browser use, including corporate roots deployed by group policy and TLS-inspection
+  proxies. If `Relay connection failed: ... CERTIFICATE_VERIFY_FAILED` still appears, export
+  the missing root CA from the Windows store as Base64 PEM and point `OUTLOOK_MCP_BRIDGE_CA`
+  at it.
 
 ## 3. Remote agent (VPS)
 

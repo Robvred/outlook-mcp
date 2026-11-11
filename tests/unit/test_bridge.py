@@ -83,10 +83,38 @@ class TestSettings:
         with pytest.raises(RemoteConfigError, match="loopback"):
             BridgeSettings(url=URL, token=TOKEN, target="https://127.0.0.1:8765").validate()
 
+    def test_ca_bundle_must_exist(self, tmp_path):
+        with pytest.raises(RemoteConfigError, match="CA bundle not found"):
+            load_bridge_settings(["--url", URL, "--token", TOKEN, "--ca-bundle", str(tmp_path / "missing.pem")], {})
+
+    def test_ca_bundle_from_env(self, tmp_path):
+        pem = tmp_path / "ca.pem"
+        pem.write_text("")
+        s = load_bridge_settings([], {"OUTLOOK_MCP_BRIDGE_URL": URL, "OUTLOOK_MCP_BRIDGE_TOKEN": TOKEN, "OUTLOOK_MCP_BRIDGE_CA": str(pem)})
+        assert s.ca_bundle == str(pem)
+
     def test_secrets_not_in_repr(self):
         s = BridgeSettings(url=URL, token=TOKEN, headers={"P-Access-Token": "secret-value"})
         assert TOKEN not in repr(s)
         assert "secret-value" not in repr(s)
+
+
+class TestSslContext:
+    def test_default_context_verifies(self):
+        import ssl
+        from outlook_mcp_server.bridge import build_ssl_context
+
+        ctx = build_ssl_context()
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname is True
+
+    def test_extra_bundle_is_loaded(self, tmp_path):
+        from outlook_mcp_server.bridge import build_ssl_context
+
+        pem = tmp_path / "bad.pem"
+        pem.write_text("not a certificate")
+        with pytest.raises(Exception):
+            build_ssl_context(str(pem))
 
 
 class FakeResponse:
