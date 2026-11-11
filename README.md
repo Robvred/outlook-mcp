@@ -24,7 +24,7 @@ Fork lineage: [marlonluo2018/outlook-mcp-server](https://github.com/marlonluo201
 
 - Windows 10 or later
 - Microsoft Outlook Classic (desktop), running and signed in
-- Python 3.8 or later
+- Python 3.10 to 3.14 (what the pinned fastmcp and the available pywin32 wheels support)
 
 ## Installation
 
